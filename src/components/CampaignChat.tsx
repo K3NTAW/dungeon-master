@@ -368,6 +368,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     if (!sessionId) return;
     
     try {
+      // Save the dice roll result
       const { data: diceMessageData, error: diceMessageError } = await supabase
         .from('messages')
         .insert([
@@ -389,15 +390,96 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
           metadata: { type: 'dice_roll', diceType, reason, result },
           created_at: diceMessageData.created_at
         }]);
+
+        // Send the dice roll result to the AI so it can react
+        await sendDiceResultToAI(diceType, reason, result);
       }
     } catch (error) {
       console.error('Error saving dice roll:', error);
     }
   };
 
+  const sendDiceResultToAI = async (diceType: string, reason: string, result: number) => {
+    try {
+      const response = await fetch('/api/campaign-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [...messages, { role: 'system', content: `Dice roll result: ${diceType} (${reason}) = ${result}` }],
+          model,
+          context: {
+            campaignId,
+            characterId,
+            character: character ? {
+              name: character.name,
+              class: character.class,
+              level: character.level,
+              race: character.race,
+              experience_points: character.experience_points,
+              hit_points: character.hit_points,
+              max_hit_points: character.max_hit_points,
+              armor_class: character.armor_class,
+              ability_scores: character.ability_scores,
+              skills: character.skills,
+              spells: character.spells,
+              equipment: character.equipment,
+              inventory: character.inventory,
+              conditions: character.conditions
+            } : null,
+            messages: messages.map(m => ({ role: m.role, content: m.content }))
+          },
+          diceResult: { diceType, reason, result }
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.content) {
+        // Save AI response to database
+        const { data: aiMessageData, error: aiMessageError } = await supabase
+          .from('messages')
+          .insert([
+            {
+              session_id: sessionId,
+              role: 'assistant',
+              content: data.content,
+              metadata: data.metadata,
+            },
+          ])
+          .select()
+          .single();
+
+        if (!aiMessageError) {
+          setMessages(prev => [...prev, {
+            id: aiMessageData.id,
+            role: 'assistant',
+            content: data.content,
+            metadata: data.metadata,
+            created_at: aiMessageData.created_at
+          }]);
+        }
+
+        // Handle character updates from AI response
+        if (data.characterUpdates && characterId) {
+          await updateCharacter(data.characterUpdates);
+        }
+      }
+
+    } catch (error) {
+      console.error('Error sending dice result to AI:', error);
+    }
+  };
+
   const renderMessageContent = (content: string, metadata?: any) => {
     // Check if the message contains dice roll requests
-    const diceRollRegex = /\[DICE:(\w+):([^\]]+)\]/g;
+    const diceRollRegex = /\[DICE:([^:]+):([^\]]+)\]/g;
     const parts = [];
     let lastIndex = 0;
     let match;
