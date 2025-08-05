@@ -65,7 +65,7 @@ export default function ChatPage() {
       setChat(data);
     } catch (error) {
       console.error('Error loading chat:', error);
-      router.push('/dashboard');
+      router.push('/campaigns');
     }
   };
 
@@ -223,7 +223,7 @@ export default function ChatPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.push('/dashboard')}
+            onClick={() => router.push('/campaigns')}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Dashboard

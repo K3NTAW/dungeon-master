@@ -35,7 +35,7 @@ export default function LoginForm() {
         console.log('Sign in successful');
         setSuccess('Sign in successful! Redirecting...');
         setTimeout(() => {
-          router.push('/dashboard');
+          router.push('/campaigns');
         }, 1000);
       }
     } catch (err) {

@@ -34,7 +34,7 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   // Protected routes
-  const protectedRoutes = ['/dashboard', '/chat'];
+  const protectedRoutes = ['/chat', '/campaigns'];
   const isProtectedRoute = protectedRoutes.some(route => 
     request.nextUrl.pathname.startsWith(route)
   );
@@ -51,8 +51,8 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isAuthRoute && user) {
-    // Redirect to dashboard if accessing auth route while authenticated
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    // Redirect to campaigns if accessing auth route while authenticated
+    return NextResponse.redirect(new URL('/campaigns', request.url));
   }
 
   return supabaseResponse;

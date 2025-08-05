@@ -20,11 +20,13 @@ export const createServerClient = () => {
 export interface Database {
   public: {
     Tables: {
-      chats: {
+      campaigns: {
         Row: {
           id: string
           user_id: string
           title: string
+          description: string | null
+          status: 'active' | 'paused' | 'completed'
           created_at: string
           updated_at: string
         }
@@ -32,12 +34,113 @@ export interface Database {
           id?: string
           user_id: string
           title: string
+          description?: string | null
+          status?: 'active' | 'paused' | 'completed'
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
           user_id?: string
+          title?: string
+          description?: string | null
+          status?: 'active' | 'paused' | 'completed'
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      characters: {
+        Row: {
+          id: string
+          user_id: string
+          campaign_id: string | null
+          name: string
+          class: string | null
+          level: number
+          race: string | null
+          background: string | null
+          ability_scores: any | null
+          skills: any | null
+          spells: any | null
+          equipment: any | null
+          inventory: any | null
+          conditions: any | null
+          experience_points: number
+          hit_points: number | null
+          max_hit_points: number | null
+          armor_class: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          campaign_id?: string | null
+          name: string
+          class?: string | null
+          level?: number
+          race?: string | null
+          background?: string | null
+          ability_scores?: any | null
+          skills?: any | null
+          spells?: any | null
+          equipment?: any | null
+          inventory?: any | null
+          conditions?: any | null
+          experience_points?: number
+          hit_points?: number | null
+          max_hit_points?: number | null
+          armor_class?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          campaign_id?: string | null
+          name?: string
+          class?: string | null
+          level?: number
+          race?: string | null
+          background?: string | null
+          ability_scores?: any | null
+          skills?: any | null
+          spells?: any | null
+          equipment?: any | null
+          inventory?: any | null
+          conditions?: any | null
+          experience_points?: number
+          hit_points?: number | null
+          max_hit_points?: number | null
+          armor_class?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      sessions: {
+        Row: {
+          id: string
+          user_id: string
+          campaign_id: string | null
+          character_id: string | null
+          title: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          campaign_id?: string | null
+          character_id?: string | null
+          title?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          campaign_id?: string | null
+          character_id?: string | null
           title?: string
           created_at?: string
           updated_at?: string
@@ -46,23 +149,26 @@ export interface Database {
       messages: {
         Row: {
           id: string
-          chat_id: string
-          role: 'user' | 'assistant'
+          session_id: string
+          role: 'user' | 'assistant' | 'system'
           content: string
+          metadata: any | null
           created_at: string
         }
         Insert: {
           id?: string
-          chat_id: string
-          role: 'user' | 'assistant'
+          session_id: string
+          role: 'user' | 'assistant' | 'system'
           content: string
+          metadata?: any | null
           created_at?: string
         }
         Update: {
           id?: string
-          chat_id?: string
-          role?: 'user' | 'assistant'
+          session_id?: string
+          role?: 'user' | 'assistant' | 'system'
           content?: string
+          metadata?: any | null
           created_at?: string
         }
       }

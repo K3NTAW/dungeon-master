@@ -20,7 +20,7 @@ export default function AuthCallback() {
       }
 
       if (data.session) {
-        router.push('/dashboard');
+        router.push('/campaigns');
       } else {
         router.push('/');
       }
