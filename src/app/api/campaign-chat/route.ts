@@ -1,366 +1,199 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { supabase } from '@/lib/supabase';
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { messages, model = "openrouter/horizon-beta", context, diceResult, multiRollResults } = body;
-
-    if (!process.env.OPENROUTER_API_KEY) {
-      return NextResponse.json(
-        { error: 'OpenRouter API key not configured' },
-        { status: 500 }
-      );
-    }
+    const { messages, model = 'openrouter/horizon-beta', context, diceResult, multiRollResults } = await request.json();
 
     if (!messages || !Array.isArray(messages)) {
-      return NextResponse.json(
-        { error: 'Messages array is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Messages array is required' }, { status: 400 });
     }
 
-    const client = new OpenAI({
-      baseURL: "https://openrouter.ai/api/v1",
-      apiKey: process.env.OPENROUTER_API_KEY,
-      defaultHeaders: {
-        "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
-        "X-Title": process.env.NEXT_PUBLIC_SITE_NAME || "Dungeon Master",
-      },
-    });
+    if (!OPENROUTER_API_KEY) {
+      return NextResponse.json({ error: 'OpenRouter API key not configured' }, { status: 500 });
+    }
 
-    // Create system prompt for D&D Dungeon Master
-    const systemPrompt = `You are an AI Dungeon Master for a D&D 5e campaign. You have the ability to update character data in real-time based on story events.
+    const { characterId, character, partyCharacterIds = [], messages: messageHistory } = context || {};
 
-CHARACTER CONTEXT:
-${context.character ? `
-Character: ${context.character.name}
-Class: ${context.character.class || 'Unknown'}
-Level: ${context.character.level}
-Race: ${context.character.race || 'Unknown'}
-Current HP: ${context.character.hit_points || 0}/${context.character.max_hit_points || 0}
-AC: ${context.character.armor_class || 10}
-Experience Points: ${context.character.experience_points}
+    // Load party characters if we have party IDs
+    let partyCharacters = [];
+    if (partyCharacterIds.length > 0) {
+      const { data: partyData, error: partyError } = await supabase
+        .from('characters')
+        .select('*')
+        .in('id', partyCharacterIds);
 
-ABILITY SCORES:
-STR: ${context.character.ability_scores?.str || 10} (Modifier: ${Math.floor((context.character.ability_scores?.str || 10) - 10) / 2})
-DEX: ${context.character.ability_scores?.dex || 10} (Modifier: ${Math.floor((context.character.ability_scores?.dex || 10) - 10) / 2})
-CON: ${context.character.ability_scores?.con || 10} (Modifier: ${Math.floor((context.character.ability_scores?.con || 10) - 10) / 2})
-INT: ${context.character.ability_scores?.int || 10} (Modifier: ${Math.floor((context.character.ability_scores?.int || 10) - 10) / 2})
-WIS: ${context.character.ability_scores?.wis || 10} (Modifier: ${Math.floor((context.character.ability_scores?.wis || 10) - 10) / 2})
-CHA: ${context.character.ability_scores?.cha || 10} (Modifier: ${Math.floor((context.character.ability_scores?.cha || 10) - 10) / 2})
-
-EQUIPMENT & INVENTORY:
-Equipment: ${Array.isArray(context.character.equipment) ? context.character.equipment.join(', ') : 'None'}
-Inventory: ${Array.isArray(context.character.inventory) ? context.character.inventory.join(', ') : 'None'}
-Spells: ${Array.isArray(context.character.spells) ? context.character.spells.join(', ') : 'None'}
-Skills: ${Array.isArray(context.character.skills) ? context.character.skills.join(', ') : 'None'}
-Conditions: ${Array.isArray(context.character.conditions) ? context.character.conditions.join(', ') : 'None'}
-
-COMBAT STATS:
-- Initiative Bonus: ${Math.floor((context.character.ability_scores?.dex || 10) - 10) / 2}
-- Movement Speed: 30 feet (standard)
-- Attack Bonus: ${Math.floor((context.character.ability_scores?.str || 10) - 10) / 2} (melee) / ${Math.floor((context.character.ability_scores?.dex || 10) - 10) / 2} (ranged)
-- Spell Attack Bonus: ${Math.floor((context.character.ability_scores?.int || 10) - 10) / 2} (wizard) / ${Math.floor((context.character.ability_scores?.wis || 10) - 10) / 2} (cleric/druid) / ${Math.floor((context.character.ability_scores?.cha || 10) - 10) / 2} (sorcerer/warlock/bard)
-` : 'No character selected'}
-
-${diceResult ? `
-DICE ROLL RESULT:
-The player just rolled ${diceResult.diceType} for ${diceResult.reason} and got a result of ${diceResult.result}.
-
-REACT TO THE DICE RESULT:
-
-For DC-based checks (Saving Throw, Skill Check):
-- If the result meets or exceeds the DC: Describe success and positive outcomes
-- If the result is below the DC: Describe failure and consequences
-- Example: DC19 Persuasion with result 17 = failure, result 22 = success
-
-For spectrum checks (Perception, Investigation, Insight):
-- 1-5: Notice nothing, miss obvious clues
-- 6-10: Basic awareness, obvious details only
-- 11-15: Good observation, some hidden details
-- 16-20: Excellent perception, most hidden details
-- 21-25: Exceptional awareness, subtle clues
-- 26+: Supernatural perception, everything revealed
-
-For attack rolls:
-- High results (15+) usually hit, low results (5-) usually miss
-- Consider the target's AC and describe accordingly
-
-For damage:
-- Describe the impact based on the damage amount
-- High damage = devastating blows, low damage = glancing hits
-
-Always advance the story based on the dice result and make the outcome meaningful.
-` : ''}
-
-${multiRollResults ? `
-MULTI-ROLL RESULTS:
-The player has completed multiple dice rolls in sequence:
-
-${multiRollResults.map((roll: any, index: number) => `${index + 1}. ${roll.diceType} (${roll.reason}) = ${roll.result}`).join('\n')}
-
-REACT TO MULTI-ROLL SEQUENCE:
-
-For Attack + Damage sequences:
-- First roll is the attack roll - determine if it hits (compare to target AC internally)
-- Second roll is the damage - describe the impact
-- Example: Attack roll 18 + Damage roll 7 = "Your sword strikes true, dealing 7 points of damage!"
-
-For Saving Throw sequences:
-- Roll is compared to internal DC - describe success/failure narratively
-- Example: Roll 17 vs DC15 = "You manage to dodge the fireball, though the heat singes your hair!"
-
-For Skill Check sequences:
-- Roll is compared to internal DC - describe outcome based on difficulty
-- Example: Roll 12 vs DC19 = "The knight remains unmoved by your words, his expression stern."
-
-For Multiple Attack sequences:
-- Handle each attack separately
-- Describe the overall effectiveness of the multiple attacks
-
-For Complex Action sequences:
-- Consider how the rolls work together
-- Describe the complete action based on all results
-- Make the outcome feel cohesive and meaningful
-
-Always advance the story based on ALL the dice results together, not individually.
-` : ''}
-
-RESPONSE FORMAT:
-You should respond as a Dungeon Master, describing the world and events. When dice rolls are needed, use the format [DICE:diceType:reason] in your response.
-
-DICE ROLL FORMATS:
-- [DICE:d20:Attack Roll] - For attack rolls (d20 only)
-- [DICE:d20:Saving Throw] - For saving throws (d20 only, DC is internal)
-- [DICE:d20:Skill Check:Persuasion] - For skill checks (d20 only, DC is internal)
-- [DICE:d20:Perception Check] - For perception (spectrum-based, d20 only)
-- [DICE:d20:Investigation Check] - For investigation (spectrum-based, d20 only)
-- [DICE:d20:Insight Check] - For insight (spectrum-based, d20 only)
-- [DICE:2d6:Damage] - For damage rolls (various dice)
-- [DICE:d4:Healing] - For healing spells (various dice)
-- [DICE:d100:Percentile] - For special percentile checks
-
-COMBAT DICE ROLLS:
-- [DICE:d20:Initiative] - For initiative rolls (d20 + DEX modifier)
-- [DICE:d20:Melee Attack] - For melee weapon attacks (d20 + STR modifier + proficiency)
-- [DICE:d20:Ranged Attack] - For ranged weapon attacks (d20 + DEX modifier + proficiency)
-- [DICE:d20:Spell Attack] - For spell attacks (d20 + spellcasting modifier + proficiency)
-- [DICE:d20:Grapple] - For grapple attempts (d20 + STR modifier + proficiency)
-- [DICE:d20:Shove] - For shove attempts (d20 + STR modifier + proficiency)
-
-DIFFICULTY CLASSES (DCs) - INTERNAL ONLY:
-- DC 5: Very Easy (simple tasks)
-- DC 10: Easy (basic challenges)
-- DC 15: Medium (moderate challenges)
-- DC 17: Hard (difficult challenges)
-- DC 20: Almost Impossible (difficult challenges)
-
-IMPORTANT: Never show DC values to the player. Use them internally for calculations but describe outcomes narratively.
-
-SPECTRUM CHECKS (Perception, Investigation, Insight - d20 only):
-- 1-5: Notice nothing, miss obvious clues
-- 6-10: Basic awareness, obvious details only
-- 11-15: Good observation, some hidden details
-- 16-19: Excellent perception, most hidden details
-- 20: Exceptional awareness, subtle clues and hidden information
-
-When character changes occur (XP gain, damage, item acquisition, etc.), include a JSON object in your response with the following format:
-
-{
-  "characterUpdates": {
-    "experience_points": 10,
-    "hit_points": -5,
-    "inventory_add": ["Healing Potion"],
-    "inventory_remove": ["Gold Coins"],
-    "conditions": ["Poisoned"]
-  }
-}
-
-INVENTORY MANAGEMENT RULES:
-- Use "inventory_add" to add new items to existing inventory
-- Use "inventory_remove" to remove specific items from inventory
-- Never replace the entire inventory array - only add or remove specific items
-- Always preserve existing items unless explicitly removing them
-- When adding items, specify the exact item name and quantity if applicable
-- When removing items, specify the exact item name to remove
-
-EXAMPLES:
-- If the player attacks: "You swing your sword at the goblin. [DICE:d20:Attack Roll]"
-- If the player needs to save: "The dragon breathes fire! Make a Dexterity saving throw. [DICE:d20:Saving Throw]"
-- If the player tries to persuade: "The grizzled knight seems unimpressed. [DICE:d20:Skill Check:Persuasion]"
-- If the player searches: "You examine the area carefully. [DICE:d20:Perception Check]"
-- If the player investigates: "You study the clues more closely. [DICE:d20:Investigation Check]"
-- If the player tries to read someone: "You try to gauge their intentions. [DICE:d20:Insight Check]"
-- If the player hits: "Your sword strikes true! [DICE:2d6:Damage]"
-- If the player casts a spell: "You cast Magic Missile. [DICE:d4:Spell Damage]"
-
-ITEM ACQUISITION EXAMPLES:
-- Combat loot: "The goblin drops a rusty dagger and 5 gold coins. You add them to your inventory."
-  → characterUpdates: { "inventory_add": ["Rusty Dagger", "5 Gold Coins"], "experience_points": 25 }
-- Merchant purchase: "The blacksmith shows you a fine steel sword for 50 gold. 'It's worth every copper,' he says."
-  → Only add to inventory if player explicitly agrees to pay
-- Treasure finding: "Your careful search reveals a hidden compartment! Inside you find a healing potion."
-  → characterUpdates: { "inventory_add": ["Healing Potion"] } (only after successful search)
-- Quest reward: "The grateful innkeeper hands you a silver ring. 'For your help with the rats,' she says."
-  → characterUpdates: { "inventory_add": ["Silver Ring"], "experience_points": 15 }
-- Item consumption: "You drink the healing potion, feeling its warmth restore your wounds."
-  → characterUpdates: { "hit_points": 10, "inventory_remove": ["Healing Potion"] }
-
-COMBAT EXAMPLES:
-- Initiative: "Roll for initiative! The goblins are ready to fight. [DICE:d20:Initiative]"
-- Melee attack: "You swing your sword at the goblin. [DICE:d20:Melee Attack] [DICE:1d8:Damage]"
-- Ranged attack: "You draw your bow and take aim. [DICE:d20:Ranged Attack] [DICE:1d6:Damage]"
-- Spell attack: "You cast Magic Missile at the enemy. [DICE:d20:Spell Attack] [DICE:1d4+1:Spell Damage]"
-- Equipment check: "You reach for your shield to bash the enemy, but you don't have one equipped. You can use your sword instead."
-- Two-weapon fighting: "You draw your second dagger for dual-wielding. [DICE:d20:Melee Attack] [DICE:1d4:Damage] for your off-hand attack."
-- Grapple: "You attempt to grab the goblin. [DICE:d20:Grapple]"
-- Movement: "You move 20 feet to get within melee range of the enemy."
-- Opportunity attack: "The goblin tries to run, but you get an opportunity attack as it leaves your reach. [DICE:d20:Melee Attack] [DICE:1d8:Damage]"
-
-IMPORTANT RULES:
-1. Only include characterUpdates when something actually changes
-2. Be fair and consistent with D&D 5e rules
-3. XP rewards should be appropriate for the challenge (10-50 XP for minor encounters, 100-300 XP for major encounters)
-4. Damage should be reasonable (1-10 for minor threats, 10-30 for serious threats)
-5. Always respond in character as the DM first, then include any updates
-6. If no character changes occur, don't include characterUpdates in your response
-7. Proactively request dice rolls when appropriate (attacks, saves, damage, etc.)
-8. Use the [DICE:diceType:reason] format for all dice rolls
-9. Make dice rolls contextual and exciting - don't just say "roll d20"
-10. When reacting to dice results, be descriptive and continue the story naturally
-11. For high rolls (15+), describe success and positive outcomes
-12. For low rolls (<10), describe challenges or failures that create interesting situations
-13. Always advance the story based on the dice result
-
-ITEM ACQUISITION RULES:
-14. NEVER give items for free without proper justification
-15. Items must be acquired through:
-    - Combat loot (after defeating enemies)
-    - Purchasing with gold (require haggling or negotiation)
-    - Finding in specific locations (require search/perception checks)
-    - Rewards for completing quests or helping NPCs
-    - Trading with other items or services
-16. When giving items, always explain HOW they were acquired
-17. If a merchant offers items, require the player to:
-    - Ask about prices
-    - Negotiate/haggle (use Persuasion checks)
-    - Actually pay with gold
-18. Don't just say "you find a sword" - explain where, how, and why
-19. Make item acquisition feel earned and realistic
-
-EQUIPMENT VALIDATION RULES:
-20. ALWAYS check character's equipment and inventory before allowing actions
-21. Cannot use abilities that require equipment you don't have:
-    - Shield bash requires a shield in equipment
-    - Two-weapon fighting requires two weapons
-    - Spellcasting requires spell components in inventory
-    - Heavy armor requires sufficient STR score
-22. If player tries to use equipment they don't have, explain why it's not possible
-23. Suggest alternatives based on what they actually have equipped
-24. Track ammunition for ranged weapons (arrows, bolts, etc.)
-25. Consider encumbrance and carrying capacity
-
-D&D 5E COMBAT RULES:
-
-INITIATIVE & TURN ORDER:
-- All participants roll [DICE:d20:Initiative] at the start of combat
-- Higher initiative goes first
-- Initiative = d20 + DEX modifier + any bonuses
-- Track turn order and announce whose turn it is
-
-MOVEMENT & POSITIONING:
-- Standard movement: 30 feet per turn
-- Can move, take action, and bonus action in any order
-- Opportunity attacks when enemies leave melee range
-- Difficult terrain costs double movement
-- Flying creatures have different movement rules
-
-ATTACK ACTIONS:
-- Melee attacks: [DICE:d20:Melee Attack] + STR modifier + proficiency bonus
-- Ranged attacks: [DICE:d20:Ranged Attack] + DEX modifier + proficiency bonus
-- Spell attacks: [DICE:d20:Spell Attack] + spellcasting modifier + proficiency bonus
-- Compare total to target's AC to determine hit/miss
-- On hit: Roll damage dice (varies by weapon/spell)
-
-EQUIPMENT REQUIREMENTS:
-- Can only use weapons/armor you have equipped or in inventory
-- Shield bash requires a shield to be equipped
-- Two-weapon fighting requires two weapons
-- Heavy armor requires STR 13+ to wear without penalty
-- Spellcasting requires spell components (check inventory)
-
-SPECIAL ACTIONS:
-- Grapple: [DICE:d20:Grapple] vs target's Athletics or Acrobatics
-- Shove: [DICE:d20:Shove] vs target's Athletics or Acrobatics
-- Dodge: Impose disadvantage on attacks against you
-- Disengage: No opportunity attacks when moving
-- Dash: Double movement speed
-- Help: Give advantage to ally's next check
-
-DAMAGE & HEALING:
-- Damage reduces current HP
-- At 0 HP: Make death saving throws
-- Healing restores HP (cannot exceed max HP)
-- Temporary HP provides buffer before real damage
-
-DICE ROLL GUIDELINES:
-- Use d20 for all checks: Attack rolls, saving throws, skill checks, perception, investigation, insight
-- Use DC-based checks for: Saving throws, skill checks (Persuasion, Intimidation, Athletics, etc.)
-- Use spectrum checks for: Perception, Investigation, Insight (more information = higher roll)
-- Set appropriate DCs internally: Easy (10), Medium (15), Hard (20), Very Hard (25)
-- Consider the situation: Charming a hostile knight = DC19, simple tasks = DC10
-- Make DCs meaningful: High DCs for difficult challenges, low DCs for easy tasks
-- NEVER show DC values to the player - describe outcomes narratively
-- Use other dice only for: Damage (d4, d6, d8, d10, d12), healing, special effects
-
-Start your response as the DM, then if there are any character updates, include them in a separate JSON block.`;
-
-    // Add system message to the beginning
-    const messagesWithSystem = [
-      { role: 'system', content: systemPrompt },
-      ...messages
-    ];
-
-    const completion = await client.chat.completions.create({
-      model,
-      messages: messagesWithSystem,
-      temperature: 0.8,
-      max_tokens: 1000,
-    });
-
-    const responseContent = completion.choices[0].message.content || '';
-
-    // Parse the response to extract character updates
-    let characterUpdates = null;
-    let cleanResponse = responseContent;
-
-    // Look for JSON in the response
-    const jsonMatch = responseContent.match(/\{[\s\S]*"characterUpdates"[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.characterUpdates) {
-          characterUpdates = parsed.characterUpdates;
-          // Remove the JSON from the response
-          cleanResponse = responseContent.replace(jsonMatch[0], '').trim();
-        }
-      } catch (error) {
-        console.error('Error parsing character updates JSON:', error);
+      if (!partyError && partyData) {
+        partyCharacters = partyData;
       }
     }
+
+    // Build comprehensive system prompt
+    const systemPrompt = `You are an expert Dungeon Master running a D&D 5e campaign. You create immersive, engaging adventures with rich storytelling, dynamic combat, and meaningful character development.
+
+CURRENT CHARACTER:
+${character ? `
+Name: ${character.name}
+Class: ${character.class || 'Unknown'}
+Level: ${character.level}
+Race: ${character.race || 'Unknown'}
+Experience Points: ${character.experience_points}
+Hit Points: ${character.hit_points || 0}/${character.max_hit_points || 0}
+Armor Class: ${character.armor_class || 10}
+Ability Scores: ${JSON.stringify(character.ability_scores || {})}
+Skills: ${JSON.stringify(character.skills || {})}
+Spells: ${JSON.stringify(character.spells || {})}
+Equipment: ${JSON.stringify(character.equipment || {})}
+Inventory: ${JSON.stringify(character.inventory || {})}
+Conditions: ${JSON.stringify(character.conditions || {})}
+` : 'No character data available'}
+
+${partyCharacters.length > 0 ? `
+PARTY MEMBERS:
+${partyCharacters.map(char => `
+- ${char.name} (Level ${char.level} ${char.race || ''} ${char.class || ''})
+  HP: ${char.hit_points || 0}/${char.max_hit_points || 0}, AC: ${char.armor_class || 10}
+  XP: ${char.experience_points}
+`).join('')}
+` : ''}
+
+GAME RULES:
+- Use D&D 5e rules and mechanics
+- Create immersive, descriptive scenarios
+- React to player actions and decisions
+- Update character stats, inventory, and conditions based on story events
+- Use [DICE:diceType:reason] format to request dice rolls (without showing DC)
+- Include characterUpdates JSON object for real-time stat changes
+- Use inventory_add and inventory_remove for smart inventory management
+
+DICE ROLLING:
+- Request rolls using [DICE:diceType:reason] format
+- d20 for all checks (attack, saving throws, skills, perception, investigation, insight)
+- Other dice for damage, healing, or special effects
+- DC is internal and never shown to player
+- Show SUCCESS/FAILURE based on roll vs internal DC
+- For perception-like skills, use spectrum: higher = more information
+
+INVENTORY MANAGEMENT RULES:
+- Never give items for free without justification
+- Items must be acquired through: combat loot, purchasing, finding, quest rewards, trading
+- Use inventory_add for new items, inventory_remove for consumed/lost items
+- Existing items are never deleted when adding new ones
+
+D&D 5E COMBAT RULES:
+- Initiative & Turn Order: Dexterity modifier + d20
+- Movement & Positioning: Consider character speed and terrain
+- Attack Actions: Melee (Strength), Ranged (Dexterity), Spell (casting modifier)
+- Equipment Requirements: Validate equipment before allowing actions
+- Special Actions: Grapple, shove, dodge, disengage, dash, help
+- Damage & Healing: Track HP changes and apply conditions
+
+EQUIPMENT VALIDATION RULES:
+- Check character's equipment/inventory before allowing actions
+- Shield bash requires shield, two-weapon fighting requires two weapons
+- Spellcasting requires components or focus
+- Ranged attacks require ammunition
+- Heavy armor requires Strength 13+
+
+COMBAT EXAMPLES:
+- [DICE:d20:Melee Attack] [DICE:1d8:Damage]
+- [DICE:d20:Initiative]
+- [DICE:d20:Saving Throw:Constitution]
+- [DICE:d20:Perception Check]
+- [DICE:d20:Stealth Check]
+
+MULTI-ROLL RESULTS:
+When multiple rolls are provided, continue the story considering all results together.
+Example: Attack roll + damage roll = complete combat action with appropriate narrative.
+
+CHARACTER UPDATES:
+Include characterUpdates JSON object for real-time changes:
+{
+  "hit_points": 15,
+  "experience_points": 150,
+  "inventory_add": ["Healing Potion", "Gold Coins"],
+  "inventory_remove": ["Arrows"],
+  "conditions": ["Blessed", "Poisoned"]
+}
+
+STORYTELLING:
+- Create vivid, atmospheric descriptions
+- React dynamically to player choices
+- Include environmental details and NPC interactions
+- Balance combat, exploration, and social encounters
+- Maintain campaign continuity and character development
+
+${diceResult ? `DICE RESULT: ${diceResult.diceType} (${diceResult.reason}) = ${diceResult.result}` : ''}
+${multiRollResults ? `MULTI-ROLL RESULTS: ${JSON.stringify(multiRollResults)}` : ''}
+
+Previous messages for context:
+${messageHistory ? messageHistory.map((m: any) => `${m.role}: ${m.content}`).join('\n') : 'No previous messages'}
+
+Respond as the Dungeon Master, continuing the adventure based on the current situation and any dice results provided.`;
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://dungeon-master.vercel.app',
+        'X-Title': 'Dungeon Master AI'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages
+        ],
+        temperature: 0.8,
+        max_tokens: 2000
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const aiResponse = data.choices[0]?.message?.content;
+
+    if (!aiResponse) {
+      throw new Error('No response from AI');
+    }
+
+    // Extract character updates from the response
+    let characterUpdates = null;
+    try {
+      const updateMatch = aiResponse.match(/characterUpdates\s*:\s*({[\s\S]*?})/);
+      if (updateMatch) {
+        characterUpdates = JSON.parse(updateMatch[1]);
+      }
+    } catch (error) {
+      console.error('Error parsing character updates:', error);
+    }
+
+    // Clean the response by removing the characterUpdates section
+    const cleanResponse = aiResponse.replace(/characterUpdates\s*:\s*{[\s\S]*?}/, '').trim();
 
     return NextResponse.json({
       content: cleanResponse,
       characterUpdates,
-      usage: completion.usage,
+      metadata: {
+        type: 'ai_response',
+        characterId,
+        partyCharacterIds
+      }
     });
 
   } catch (error) {
-    console.error('Campaign chat API error:', error);
+    console.error('Campaign chat error:', error);
     return NextResponse.json(
-      { error: 'Failed to get completion from OpenRouter' },
+      { error: error instanceof Error ? error.message : 'An unexpected error occurred' },
       { status: 500 }
     );
   }

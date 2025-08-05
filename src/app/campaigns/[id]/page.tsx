@@ -281,16 +281,10 @@ export default function CampaignPage() {
           {/* Characters Section */}
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle className="flex items-center gap-2">
-                  <Sword className="h-5 w-5" />
-                  Characters ({characters.length})
-                </CardTitle>
-                <Button size="sm" onClick={() => router.push(`/campaigns/${id}/characters/create`)}>
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Add Character
-                </Button>
-              </div>
+              <CardTitle className="flex items-center gap-2">
+                <Sword className="h-5 w-5" />
+                Characters ({characters.length})
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Quick Character Creation */}

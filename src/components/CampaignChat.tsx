@@ -46,6 +46,7 @@ interface CampaignChatProps {
   campaignId: string;
   characterId?: string;
   sessionId?: string;
+  partyCharacterIds?: string[];
   onCharacterUpdate?: (character: Character) => void;
 }
 
@@ -53,6 +54,7 @@ export default function CampaignChat({
   campaignId, 
   characterId, 
   sessionId, 
+  partyCharacterIds = [],
   onCharacterUpdate 
 }: CampaignChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -237,6 +239,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
           inventory: character.inventory,
           conditions: character.conditions
         } : null,
+        partyCharacterIds,
         messages: messages.map(m => ({ role: m.role, content: m.content }))
       };
 
@@ -601,6 +604,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
               inventory: character.inventory,
               conditions: character.conditions
             } : null,
+            partyCharacterIds,
             messages: messages.map(m => ({ role: m.role, content: m.content }))
           },
           multiRollResults: rolls
@@ -679,6 +683,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
               inventory: character.inventory,
               conditions: character.conditions
             } : null,
+            partyCharacterIds,
             messages: messages.map(m => ({ role: m.role, content: m.content }))
           },
           diceResult: { diceType, reason, result }

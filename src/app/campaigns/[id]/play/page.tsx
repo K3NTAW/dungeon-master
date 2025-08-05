@@ -6,9 +6,10 @@ import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Sword } from 'lucide-react';
+import { ArrowLeft, Sword, Users, User, Crown } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
 
 interface Campaign {
@@ -36,7 +37,8 @@ export default function PlayPage() {
   const router = useRouter();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
-  const [selectedCharacter, setSelectedCharacter] = useState<string>('');
+  const [activeCharacters, setActiveCharacters] = useState<string[]>([]);
+  const [currentSpeaker, setCurrentSpeaker] = useState<string>('');
   const [currentSession, setCurrentSession] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
@@ -71,11 +73,43 @@ export default function PlayPage() {
       if (charactersError) throw charactersError;
       setCharacters(charactersData || []);
 
-      // Auto-select first character if available
+      // Load saved party state from localStorage
+      const savedPartyState = localStorage.getItem(`party-state-${id}`);
+      let savedActiveCharacters: string[] = [];
+      let savedCurrentSpeaker: string = '';
+
+      if (savedPartyState) {
+        try {
+          const parsed = JSON.parse(savedPartyState);
+          savedActiveCharacters = parsed.activeCharacters || [];
+          savedCurrentSpeaker = parsed.currentSpeaker || '';
+        } catch (error) {
+          console.error('Error parsing saved party state:', error);
+        }
+      }
+
+      // Set party state - use saved state if available, otherwise default to first character
       if (charactersData && charactersData.length > 0) {
-        setSelectedCharacter(charactersData[0].id);
-        // Load or create session for this character
-        await loadOrCreateSession(charactersData[0].id);
+        if (savedActiveCharacters.length > 0 && savedCurrentSpeaker) {
+          // Use saved state, but validate that characters still exist
+          const validActiveCharacters = savedActiveCharacters.filter(charId => 
+            charactersData.some(char => char.id === charId)
+          );
+          const validSpeaker = charactersData.some(char => char.id === savedCurrentSpeaker) 
+            ? savedCurrentSpeaker 
+            : validActiveCharacters[0] || charactersData[0].id;
+
+          setActiveCharacters(validActiveCharacters.length > 0 ? validActiveCharacters : [charactersData[0].id]);
+          setCurrentSpeaker(validSpeaker);
+        } else {
+          // Default to first character if no saved state
+          const firstCharacterId = charactersData[0].id;
+          setActiveCharacters([firstCharacterId]);
+          setCurrentSpeaker(firstCharacterId);
+        }
+        
+        // Load or create session for the campaign
+        await loadOrCreateSession();
       }
 
     } catch (error) {
@@ -86,36 +120,27 @@ export default function PlayPage() {
     }
   };
 
-  const loadOrCreateSession = async (characterId: string) => {
+  const loadOrCreateSession = async () => {
     try {
-      // First, try to find an existing active session for this character
+      // For party-based gameplay, we use one session per campaign
       const { data: existingSession, error: findError } = await supabase
         .from('sessions')
         .select('*')
         .eq('campaign_id', id)
-        .eq('character_id', characterId)
         .order('updated_at', { ascending: false })
         .limit(1)
         .single();
 
-      if (findError && findError.code !== 'PGRST116') { // PGRST116 = no rows returned
-        throw findError;
-      }
-
       if (existingSession) {
-        // Use existing session
         setCurrentSession(existingSession.id);
-        console.log('Using existing session:', existingSession.id);
       } else {
-        // Create new session
+        // Create new session for the campaign
         const { data: newSession, error: createError } = await supabase
           .from('sessions')
           .insert([
             {
-              user_id: user?.id,
               campaign_id: id,
-              character_id: characterId,
-              title: `Session ${new Date().toLocaleDateString()}`,
+              title: `${campaign?.title} - Party Session`,
             },
           ])
           .select()
@@ -123,16 +148,57 @@ export default function PlayPage() {
 
         if (createError) throw createError;
         setCurrentSession(newSession.id);
-        console.log('Created new session:', newSession.id);
       }
     } catch (error) {
       console.error('Error loading/creating session:', error);
     }
   };
 
-  const handleCharacterChange = async (newCharacterId: string) => {
-    setSelectedCharacter(newCharacterId);
-    await loadOrCreateSession(newCharacterId);
+  const handleCharacterToggle = (characterId: string) => {
+    setActiveCharacters(prev => {
+      let newActive: string[];
+      let newSpeaker = currentSpeaker;
+
+      if (prev.includes(characterId)) {
+        // Remove character from party
+        newActive = prev.filter(id => id !== characterId);
+        // If removing current speaker, switch to first available character
+        if (currentSpeaker === characterId && newActive.length > 0) {
+          newSpeaker = newActive[0];
+          setCurrentSpeaker(newActive[0]);
+        }
+      } else {
+        // Add character to party
+        newActive = [...prev, characterId];
+        // If no current speaker, set this one
+        if (!currentSpeaker) {
+          newSpeaker = characterId;
+          setCurrentSpeaker(characterId);
+        }
+      }
+
+      // Save to localStorage
+      const partyState = {
+        activeCharacters: newActive,
+        currentSpeaker: newSpeaker
+      };
+      localStorage.setItem(`party-state-${id}`, JSON.stringify(partyState));
+
+      return newActive;
+    });
+  };
+
+  const handleSpeakerChange = (characterId: string) => {
+    if (activeCharacters.includes(characterId)) {
+      setCurrentSpeaker(characterId);
+      
+      // Save to localStorage
+      const partyState = {
+        activeCharacters,
+        currentSpeaker: characterId
+      };
+      localStorage.setItem(`party-state-${id}`, JSON.stringify(partyState));
+    }
   };
 
   if (loading) {
@@ -159,6 +225,9 @@ export default function PlayPage() {
     );
   }
 
+  const currentSpeakerCharacter = characters.find(c => c.id === currentSpeaker);
+  const activeCharacterObjects = characters.filter(c => activeCharacters.includes(c.id));
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto py-4 px-4">
@@ -175,111 +244,174 @@ export default function PlayPage() {
           <div className="flex-1">
             <h1 className="text-2xl font-bold">{campaign.title}</h1>
             <p className="text-muted-foreground">
-              Playing as {selectedCharacter ? characters.find(c => c.id === selectedCharacter)?.name : 'No character selected'}
+              Party Adventure - {activeCharacterObjects.length} character{activeCharacterObjects.length !== 1 ? 's' : ''} active
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Character:</span>
-            <Select value={selectedCharacter} onValueChange={handleCharacterChange}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Select character" />
-              </SelectTrigger>
-              <SelectContent>
-                {characters.map((character) => (
-                  <SelectItem key={character.id} value={character.id}>
-                    {character.name} (Level {character.level} {character.race} {character.class})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        </div>
+
+        {/* Party Management */}
+        <div className="mb-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                Party Management
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Character Selection */}
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Available Characters</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {characters.map((character) => {
+                      const isActive = activeCharacters.includes(character.id);
+                      const isSpeaker = currentSpeaker === character.id;
+                      return (
+                        <div
+                          key={character.id}
+                          className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                            isActive 
+                              ? 'border-primary bg-primary/5' 
+                              : 'border-muted bg-muted/20'
+                          }`}
+                          onClick={() => handleCharacterToggle(character.id)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1">
+                                {isSpeaker && <Crown className="h-4 w-4 text-yellow-500" />}
+                                <span className="font-medium">{character.name}</span>
+                              </div>
+                              <Badge variant="outline" className="text-xs">
+                                Lv.{character.level} {character.class}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {isActive && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Active
+                                </Badge>
+                              )}
+                              <div className="text-xs text-muted-foreground">
+                                HP: {character.hit_points || 0}/{character.max_hit_points || 0}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Current Speaker Selection */}
+                {activeCharacters.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium mb-2">Current Speaker</h3>
+                    <Select value={currentSpeaker} onValueChange={handleSpeakerChange}>
+                      <SelectTrigger className="w-64">
+                        <SelectValue placeholder="Select speaking character" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeCharacterObjects.map((character) => (
+                          <SelectItem key={character.id} value={character.id}>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4" />
+                              {character.name} (Level {character.level} {character.class})
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {currentSpeakerCharacter && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {currentSpeakerCharacter.name} will speak for the party
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Game Interface */}
-        <div className="grid gap-6 lg:grid-cols-4">
-          {/* Character Info Sidebar */}
-          <div className="lg:col-span-1">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sword className="h-5 w-5" />
-                  Character Info
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {selectedCharacter ? (
+        {activeCharacters.length > 0 ? (
+          <div className="grid gap-6 lg:grid-cols-4">
+            {/* Party Info Sidebar */}
+            <div className="lg:col-span-1">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Sword className="h-5 w-5" />
+                    Party Status
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
                   <div className="space-y-4">
-                    {(() => {
-                      const character = characters.find(c => c.id === selectedCharacter);
-                      if (!character) return null;
-                      
-                      return (
-                        <>
+                    {activeCharacterObjects.map((character) => (
+                      <div key={character.id} className="p-3 border rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="font-semibold text-sm">{character.name}</h3>
+                          {currentSpeaker === character.id && (
+                            <Crown className="h-4 w-4 text-yellow-500" />
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Level {character.level} {character.race} {character.class}
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
                           <div>
-                            <h3 className="font-semibold text-lg">{character.name}</h3>
-                            <p className="text-sm text-muted-foreground">
-                              Level {character.level} {character.race} {character.class}
-                            </p>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <span className="text-muted-foreground">HP:</span>
-                              <div className="font-medium">
-                                {character.hit_points || 0}/{character.max_hit_points || 0}
-                              </div>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">AC:</span>
-                              <div className="font-medium">{character.armor_class || 10}</div>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">XP:</span>
-                              <div className="font-medium">{character.experience_points}</div>
+                            <span className="text-muted-foreground">HP:</span>
+                            <div className="font-medium">
+                              {character.hit_points || 0}/{character.max_hit_points || 0}
                             </div>
                           </div>
-                          
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => router.push(`/campaigns/${id}/characters/${character.id}`)}
-                            className="w-full"
-                          >
-                            Edit Character
-                          </Button>
-                        </>
-                      );
-                    })()}
+                          <div>
+                            <span className="text-muted-foreground">AC:</span>
+                            <div className="font-medium">{character.armor_class || 10}</div>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">XP:</span>
+                            <div className="font-medium">{character.experience_points}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <p className="text-muted-foreground mb-2">No character selected</p>
-                    <Button
-                      size="sm"
-                      onClick={() => router.push(`/campaigns/${id}`)}
-                    >
-                      Create Character
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                </CardContent>
+              </Card>
+            </div>
 
-          {/* Main Chat Area */}
-          <div className="lg:col-span-3">
-            <CampaignChat 
-              campaignId={id as string}
-              characterId={selectedCharacter}
-              sessionId={currentSession}
-              onCharacterUpdate={(updatedCharacter) => {
-                setCharacters(prev => 
-                  prev.map(c => c.id === updatedCharacter.id ? updatedCharacter : c)
-                );
-              }}
-            />
+            {/* Main Game Area */}
+            <div className="lg:col-span-3">
+              <CampaignChat
+                campaignId={id as string}
+                characterId={currentSpeaker}
+                sessionId={currentSession}
+                partyCharacterIds={activeCharacters}
+                onCharacterUpdate={(updatedCharacter) => {
+                  setCharacters(prev => 
+                    prev.map(c => c.id === updatedCharacter.id ? updatedCharacter : c)
+                  );
+                }}
+              />
+            </div>
           </div>
-        </div>
+        ) : (
+          <Card>
+            <CardContent className="text-center py-12">
+              <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+              <h3 className="text-lg font-semibold mb-2">No Characters Selected</h3>
+              <p className="text-muted-foreground mb-4">
+                Select at least one character to start your party adventure!
+              </p>
+              <Button onClick={() => router.push(`/campaigns/${id}`)}>
+                Manage Characters
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
