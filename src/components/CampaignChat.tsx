@@ -8,8 +8,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star } from 'lucide-react';
+import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star, Dices } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { InventoryManager } from '@/lib/inventory';
+import { CombatManager } from '@/lib/combat';
 import InlineDiceRoll from './InlineDiceRoll';
 
 interface Message {
@@ -61,6 +63,8 @@ export default function CampaignChat({
   const [character, setCharacter] = useState<Character | null>(null);
   const [characterSheet, setCharacterSheet] = useState('');
   const [inventory, setInventory] = useState('');
+  const [pendingRolls, setPendingRolls] = useState<Array<{diceType: string, reason: string, result?: number}>>([]);
+  const [isWaitingForRolls, setIsWaitingForRolls] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -130,6 +134,12 @@ export default function CampaignChat({
   };
 
   const formatCharacterSheet = (char: Character) => {
+    // Calculate combat stats
+    const dexMod = Math.floor((char.ability_scores?.dex || 10) - 10) / 2;
+    const attackBonus = CombatManager.calculateAttackBonus(char.ability_scores, char.class);
+    const movementSpeed = CombatManager.calculateMovementSpeed(30, char.equipment, char.conditions);
+    const availableActions = CombatManager.getAvailableActions(char.equipment, char.inventory, char.ability_scores);
+
     return `Name: ${char.name}
 Class: ${char.class || 'Unknown'}
 Level: ${char.level}
@@ -147,7 +157,13 @@ CHA: ${char.ability_scores?.cha || 10} (+${Math.floor((char.ability_scores?.cha 
 Combat Stats:
 HP: ${char.hit_points || 0}/${char.max_hit_points || 0}
 AC: ${char.armor_class || 10}
+Initiative: +${dexMod}
+Movement: ${movementSpeed} feet
+Attack Bonus: Melee +${attackBonus.melee}, Ranged +${attackBonus.ranged}, Spell +${attackBonus.spell}
 XP: ${char.experience_points}
+
+Available Combat Actions:
+${availableActions.join(', ')}
 
 Skills: ${Array.isArray(char.skills) ? char.skills.join(', ') : 'None'}
 Spells: ${Array.isArray(char.spells) ? char.spells.join(', ') : 'None'}
@@ -156,7 +172,7 @@ Equipment: ${Array.isArray(char.equipment) ? char.equipment.join(', ') : 'None'}
 
   const formatInventory = (char: Character) => {
     return `Inventory:
-${Array.isArray(char.inventory) ? char.inventory.join('\n') : 'Empty'}
+${InventoryManager.formatInventory(char.inventory)}
 
 Conditions:
 ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
@@ -303,9 +319,44 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     try {
       console.log('Updating character with:', updates);
       
+      // Handle smart inventory updates
+      let processedUpdates = { ...updates };
+      
+      if (updates.inventory_add || updates.inventory_remove) {
+        // Get current character data to work with existing inventory
+        const { data: currentCharacter, error: fetchError } = await supabase
+          .from('characters')
+          .select('inventory')
+          .eq('id', characterId)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        // Use InventoryManager to process updates
+        const updatedInventory = InventoryManager.processInventoryUpdates(
+          currentCharacter.inventory || [],
+          updates
+        );
+        
+        // Create new object with processed inventory
+        processedUpdates = {
+          ...processedUpdates,
+          inventory: updatedInventory
+        };
+        delete processedUpdates.inventory_add;
+        delete processedUpdates.inventory_remove;
+        
+        console.log('Smart inventory update:', {
+          original: currentCharacter.inventory,
+          added: updates.inventory_add,
+          removed: updates.inventory_remove,
+          final: updatedInventory
+        });
+      }
+      
       const { data, error } = await supabase
         .from('characters')
-        .update(updates)
+        .update(processedUpdates)
         .eq('id', characterId)
         .select()
         .single();
@@ -323,14 +374,23 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
 
       // Add system message about the update
       try {
+        const updateDescription = [];
+        if (updates.inventory_add) updateDescription.push(`Added: ${updates.inventory_add.join(', ')}`);
+        if (updates.inventory_remove) updateDescription.push(`Removed: ${updates.inventory_remove.join(', ')}`);
+        if (updates.experience_points) updateDescription.push(`XP: ${updates.experience_points > 0 ? '+' : ''}${updates.experience_points}`);
+        if (updates.hit_points) updateDescription.push(`HP: ${updates.hit_points > 0 ? '+' : ''}${updates.hit_points}`);
+        if (updates.conditions) updateDescription.push(`Conditions: ${updates.conditions.join(', ')}`);
+        
+        const updateMessage = updateDescription.length > 0 ? updateDescription.join(', ') : Object.keys(processedUpdates).join(', ');
+        
         const { data: updateMessageData, error: updateMessageError } = await supabase
           .from('messages')
           .insert([
             {
               session_id: sessionId,
               role: 'system',
-              content: `Character updated: ${Object.keys(updates).join(', ')}`,
-              metadata: { type: 'character_update', updates },
+              content: `Character updated: ${updateMessage}`,
+              metadata: { type: 'character_update', updates: processedUpdates },
             },
           ])
           .select()
@@ -340,8 +400,8 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
           setMessages(prev => [...prev, {
             id: updateMessageData.id,
             role: 'system',
-            content: `Character updated: ${Object.keys(updates).join(', ')}`,
-            metadata: { type: 'character_update', updates },
+            content: `Character updated: ${updateMessage}`,
+            metadata: { type: 'character_update', updates: processedUpdates },
             created_at: updateMessageData.created_at
           }]);
         }
@@ -394,11 +454,116 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
           created_at: diceMessageData.created_at
         }]);
 
-        // Send the dice roll result to the AI so it can react
-        await sendDiceResultToAI(diceType, reason, result);
+        // Check if we're in a multi-roll sequence
+        if (isWaitingForRolls && pendingRolls.length > 0) {
+          // Update the pending roll with the result
+          const updatedPendingRolls = pendingRolls.map(roll => 
+            roll.diceType === diceType && roll.reason === reason 
+              ? { ...roll, result } 
+              : roll
+          );
+          
+          setPendingRolls(updatedPendingRolls);
+          
+          // Check if all rolls are complete
+          const allRollsComplete = updatedPendingRolls.every(roll => roll.result !== undefined);
+          
+          if (allRollsComplete) {
+            // Send all roll results to AI (filter out undefined results)
+            const completedRolls = updatedPendingRolls.filter(roll => roll.result !== undefined) as Array<{diceType: string, reason: string, result: number}>;
+            await sendMultiRollResultsToAI(completedRolls);
+            
+            // Reset pending rolls
+            setPendingRolls([]);
+            setIsWaitingForRolls(false);
+          }
+        } else {
+          // Single roll - send immediately
+          await sendDiceResultToAI(diceType, reason, result);
+        }
       }
     } catch (error) {
       console.error('Error saving dice roll:', error);
+    }
+  };
+
+  const sendMultiRollResultsToAI = async (rolls: Array<{diceType: string, reason: string, result: number}>) => {
+    try {
+      const rollResultsText = rolls.map(roll => `${roll.diceType} (${roll.reason}) = ${roll.result}`).join(', ');
+      
+      const response = await fetch('/api/campaign-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [...messages, { role: 'system', content: `Multi-roll results: ${rollResultsText}` }],
+          model,
+          context: {
+            campaignId,
+            characterId,
+            character: character ? {
+              name: character.name,
+              class: character.class,
+              level: character.level,
+              race: character.race,
+              experience_points: character.experience_points,
+              hit_points: character.hit_points,
+              max_hit_points: character.max_hit_points,
+              armor_class: character.armor_class,
+              ability_scores: character.ability_scores,
+              skills: character.skills,
+              spells: character.spells,
+              equipment: character.equipment,
+              inventory: character.inventory,
+              conditions: character.conditions
+            } : null,
+            messages: messages.map(m => ({ role: m.role, content: m.content }))
+          },
+          multiRollResults: rolls
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.content) {
+        // Save AI response to database
+        const { data: aiMessageData, error: aiMessageError } = await supabase
+          .from('messages')
+          .insert([
+            {
+              session_id: sessionId,
+              role: 'assistant',
+              content: data.content,
+              metadata: data.metadata,
+            },
+          ])
+          .select()
+          .single();
+
+        if (!aiMessageError) {
+          setMessages(prev => [...prev, {
+            id: aiMessageData.id,
+            role: 'assistant',
+            content: data.content,
+            metadata: data.metadata,
+            created_at: aiMessageData.created_at
+          }]);
+
+          // Handle character updates
+          if (data.characterUpdates && characterId) {
+            await updateCharacter(data.characterUpdates);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error sending multi-roll results to AI:', error);
+      setError(error instanceof Error ? error.message : 'An unexpected error occurred');
     }
   };
 
@@ -486,6 +651,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     const parts = [];
     let lastIndex = 0;
     let match;
+    const foundRolls: Array<{diceType: string, reason: string}> = [];
 
     while ((match = diceRollRegex.exec(content)) !== null) {
       // Add text before the dice roll
@@ -496,6 +662,8 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
       // Add the dice roll component
       const diceType = match[1];
       const reason = match[2];
+      foundRolls.push({ diceType, reason });
+      
       parts.push(
         <InlineDiceRoll
           key={`dice-${match.index}`}
@@ -512,6 +680,12 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     // Add remaining text
     if (lastIndex < content.length) {
       parts.push(content.slice(lastIndex));
+    }
+
+    // Set up multi-roll sequence if multiple rolls are found
+    if (foundRolls.length > 1 && !isWaitingForRolls) {
+      setPendingRolls(foundRolls.map(roll => ({ ...roll, result: undefined })));
+      setIsWaitingForRolls(true);
     }
 
     return parts.length > 0 ? parts : content;
@@ -540,7 +714,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="chat" className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
                 Chat
@@ -548,6 +722,10 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
               <TabsTrigger value="sheet" className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
                 Character Sheet
+              </TabsTrigger>
+              <TabsTrigger value="combat" className="flex items-center gap-2">
+                <Star className="h-4 w-4" />
+                Combat
               </TabsTrigger>
               <TabsTrigger value="inventory" className="flex items-center gap-2">
                 <Package className="h-4 w-4" />
@@ -609,6 +787,28 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                       <div className="flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         <p className="text-sm">AI is thinking...</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {isWaitingForRolls && pendingRolls.length > 0 && (
+                  <div className="flex justify-start">
+                    <div className="bg-blue-100 border border-blue-200 px-4 py-2 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <Dices className="h-4 w-4 text-blue-600" />
+                        <div>
+                          <p className="text-sm font-medium text-blue-800">
+                            Waiting for {pendingRolls.filter(roll => roll.result === undefined).length} more roll{pendingRolls.filter(roll => roll.result === undefined).length !== 1 ? 's' : ''}...
+                          </p>
+                          <p className="text-xs text-blue-600">
+                            {pendingRolls.map(roll => 
+                              roll.result !== undefined 
+                                ? `✅ ${roll.diceType} (${roll.reason}): ${roll.result}`
+                                : `⏳ ${roll.diceType} (${roll.reason})`
+                            ).join(', ')}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -676,6 +876,90 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                 className="min-h-[400px] resize-none font-mono text-sm"
                 readOnly
               />
+            </TabsContent>
+
+            {/* Combat Tab */}
+            <TabsContent value="combat" className="space-y-4 mt-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-semibold">Combat Information</h3>
+                {character && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Heart className="h-4 w-4" />
+                    <span>HP: {character.hit_points || 0}/{character.max_hit_points || 0}</span>
+                    <span>AC: {character.armor_class || 10}</span>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Combat Stats</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    {character && (
+                      <>
+                        <div className="flex justify-between">
+                          <span>Initiative:</span>
+                          <span>+{Math.floor((character.ability_scores?.dex || 10) - 10) / 2}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Movement:</span>
+                          <span>{CombatManager.calculateMovementSpeed(30, character.equipment, character.conditions)} feet</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Melee Attack:</span>
+                          <span>+{CombatManager.calculateAttackBonus(character.ability_scores, character.class).melee}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Ranged Attack:</span>
+                          <span>+{CombatManager.calculateAttackBonus(character.ability_scores, character.class).ranged}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Spell Attack:</span>
+                          <span>+{CombatManager.calculateAttackBonus(character.ability_scores, character.class).spell}</span>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Available Actions</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {character ? (
+                      <div className="space-y-1 text-sm">
+                        {CombatManager.getAvailableActions(character.equipment, character.inventory, character.ability_scores).map((action, index) => (
+                          <div key={index} className="px-2 py-1 bg-muted rounded text-xs">
+                            {action}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground text-sm">No character loaded</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Equipment Validation</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 text-sm">
+                    <p className="text-muted-foreground">
+                      The AI will check your equipment before allowing actions. You cannot:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1 text-xs">
+                      <li>Use shield bash without a shield</li>
+                      <li>Two-weapon fight without two weapons</li>
+                      <li>Cast spells without components</li>
+                      <li>Use ranged weapons without ammunition</li>
+                      <li>Wear heavy armor without sufficient Strength</li>
+                    </ul>
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
 
             {/* Inventory Tab */}

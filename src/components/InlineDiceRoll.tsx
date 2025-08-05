@@ -15,13 +15,17 @@ export default function InlineDiceRoll({ diceType, reason, onRoll, className = '
   const [isRolling, setIsRolling] = useState(false);
   const [result, setResult] = useState<number | null>(null);
 
-  // Parse reason to extract DC and check type
+  // Parse reason to extract DC and check type (DC is hidden from player)
   const parseReason = (reason: string) => {
     const dcMatch = reason.match(/DC(\d+)/);
     const dc = dcMatch ? parseInt(dcMatch[1]) : null;
     
-    // Remove DC from display reason
-    const displayReason = reason.replace(/DC\d+/, '').replace(/^Skill Check:/, '').replace(/^Saving Throw:/, '');
+    // Remove DC from display reason and clean up formatting
+    const displayReason = reason
+      .replace(/DC\d+/, '')
+      .replace(/^Skill Check:/, '')
+      .replace(/^Saving Throw:/, '')
+      .trim();
     
     return { dc, displayReason };
   };
@@ -79,9 +83,6 @@ export default function InlineDiceRoll({ diceType, reason, onRoll, className = '
       </div>
       <div className="flex flex-col">
         <span className="text-sm opacity-75">({displayReason})</span>
-        {dc && (
-          <span className="text-xs font-semibold text-blue-600">DC {dc}</span>
-        )}
       </div>
       {result === null ? (
         <Button
@@ -103,11 +104,6 @@ export default function InlineDiceRoll({ diceType, reason, onRoll, className = '
       ) : (
         <div className="flex flex-col items-center ml-2">
           <span className="font-bold text-lg">= {result}</span>
-          {dc && (
-            <span className={`text-xs font-semibold ${result >= dc ? 'text-green-600' : 'text-red-600'}`}>
-              {result >= dc ? 'SUCCESS' : 'FAILURE'}
-            </span>
-          )}
         </div>
       )}
     </div>
