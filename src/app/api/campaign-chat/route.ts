@@ -188,7 +188,9 @@ INVENTORY MANAGEMENT RULES:
 - Never give items for free without justification
 - Items must be acquired through: combat loot, purchasing, finding, quest rewards, trading
 - Use inventory_add for new items, inventory_remove for consumed/lost items
+- Use inventory_edit for quantity changes (e.g., {"pouch (10)": "pouch (5)"})
 - Existing items are never deleted when adding new ones
+- Quantities are tracked automatically (e.g., "arrows (20)" becomes "arrows (15)" after using 5)
 
 D&D 5E COMBAT RULES:
 - Initiative & Turn Order: Dexterity modifier + d20
@@ -241,6 +243,7 @@ Include characterUpdates JSON object for real-time changes:
   "experience_points": 150,
   "inventory_add": ["Healing Potion", "Gold Coins"],
   "inventory_remove": ["Arrows"],
+  "inventory_edit": {"pouch (10)": "pouch (5)", "arrows (20)": "arrows (15)"},
   "conditions": ["Blessed", "Poisoned"]
 }
 
