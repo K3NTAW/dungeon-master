@@ -268,7 +268,7 @@ Respond as the Dungeon Master, continuing the adventure based on the current sit
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://dungeon-master.vercel.app',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'https://dungeon-master.vercel.app',
         'X-Title': 'Dungeon Master AI'
       },
       body: JSON.stringify({
