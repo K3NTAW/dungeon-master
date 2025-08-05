@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star, Dices } from 'lucide-react';
+import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import InlineDiceRoll from './InlineDiceRoll';
 
