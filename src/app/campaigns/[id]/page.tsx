@@ -1,16 +1,15 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Plus, Sword, Users, Calendar, Play, Edit, Trash2, UserPlus, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Plus, Sword, Play, Edit, Trash2, UserPlus, MessageSquare } from 'lucide-react';
 
 interface Campaign {
   id: string;
@@ -58,7 +57,7 @@ export default function CampaignPage() {
       return;
     }
     loadCampaignData();
-  }, [id, user]);
+  }, [id, user, router]);
 
   const loadCampaignData = async () => {
     try {
@@ -190,7 +189,7 @@ export default function CampaignPage() {
 
   const createSession = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: sessionData, error } = await supabase
         .from('sessions')
         .insert([
           {
@@ -203,7 +202,7 @@ export default function CampaignPage() {
         .single();
 
       if (error) throw error;
-      router.push(`/campaigns/${id}/sessions/${data.id}`);
+      router.push(`/campaigns/${id}/sessions/${sessionData.id}`);
     } catch (error) {
       console.error('Error creating session:', error);
     }

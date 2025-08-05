@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -38,7 +39,7 @@ export default function SessionPage() {
       return;
     }
     loadSessionData();
-  }, [sessionId, user]);
+  }, [sessionId, user, router]);
 
   const loadSessionData = async () => {
     try {

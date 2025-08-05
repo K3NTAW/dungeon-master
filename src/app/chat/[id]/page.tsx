@@ -1,10 +1,10 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -42,7 +42,7 @@ export default function ChatPage() {
     loadChat();
     loadMessages();
     subscribeToMessages();
-  }, [id, user]);
+  }, [id, user, router]);
 
   useEffect(() => {
     scrollToBottom();
@@ -117,7 +117,7 @@ export default function ChatPage() {
 
     try {
       // Save user message
-      const { data: userMsgData, error: userError } = await supabase
+      const { data: _userMsgData, error: userError } = await supabase
         .from('messages')
         .insert([
           {

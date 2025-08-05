@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -7,10 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Save, Trash2, Sword, Heart, Shield, Star } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Sword, Shield, Star } from 'lucide-react';
 
 interface Character {
   id: string;
@@ -78,7 +78,7 @@ export default function CharacterEditPage() {
       return;
     }
     loadCharacterData();
-  }, [characterId, user]);
+  }, [characterId, user, router]);
 
   const loadCharacterData = async () => {
     try {

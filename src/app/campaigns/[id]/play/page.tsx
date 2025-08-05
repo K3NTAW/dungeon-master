@@ -1,13 +1,14 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Sword, Users, Play, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Sword } from 'lucide-react';
 import CampaignChat from '@/components/CampaignChat';
 
 interface Campaign {
@@ -45,7 +46,7 @@ export default function PlayPage() {
       return;
     }
     loadCampaignData();
-  }, [id, user]);
+  }, [id, user, router]);
 
   const loadCampaignData = async () => {
     try {

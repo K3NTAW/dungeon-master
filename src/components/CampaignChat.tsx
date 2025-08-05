@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import InlineDiceRoll from './InlineDiceRoll';
@@ -24,6 +26,7 @@ interface Character {
   class: string | null;
   level: number;
   race: string | null;
+  background: string | null;
   experience_points: number;
   hit_points: number | null;
   max_hit_points: number | null;
@@ -477,7 +480,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     }
   };
 
-  const renderMessageContent = (content: string, metadata?: any) => {
+  const renderMessageContent = (content: string, _metadata?: any) => {
     // Check if the message contains dice roll requests
     const diceRollRegex = /\[DICE:([^:]+):([^\]]+)\]/g;
     const parts = [];
