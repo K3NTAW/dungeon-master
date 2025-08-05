@@ -19,6 +19,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 # OpenRouter Configuration (for AI chat)
 OPENROUTER_API_KEY=your_openrouter_api_key
+
+# ElevenLabs Configuration (for voice narration)
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+ELEVENLABS_VOICE_ID=VR6AewLTigWG4xSOukaG
 ```
 
 ### Getting Supabase Credentials
@@ -34,6 +38,19 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 2. Navigate to your API keys section
 3. Create a new API key
 4. Add it to your `.env.local` file
+
+### Getting ElevenLabs API Key
+
+1. Go to [elevenlabs.io](https://elevenlabs.io) and create an account
+2. Navigate to your profile settings
+3. Copy your API key
+4. Add it to your `.env.local` file
+5. (Optional) Choose a specific voice ID from your ElevenLabs dashboard or use the default
+
+**To use Brian's voice:**
+1. In your ElevenLabs dashboard, find Brian's voice ID
+2. Replace `ELEVENLABS_VOICE_ID=VR6AewLTigWG4xSOukaG` with `ELEVENLABS_VOICE_ID=your_brian_voice_id`
+3. The app will automatically use Brian's voice for narration
 
 ## 2. Database Setup
 
@@ -74,6 +91,12 @@ The application will be available at `http://localhost:3000`
 - OpenRouter integration for AI responses
 - Message history context
 - Automatic chat title generation
+
+### Voice Narration
+- ElevenLabs integration for high-quality voice synthesis
+- Multiple voice options for different characters
+- Real-time voice narration of AI responses
+- Voice settings and controls
 
 ## 6. Database Schema
 
@@ -125,6 +148,7 @@ The database is hosted on Supabase, which provides:
 2. **Database errors**: Ensure you've run the schema SQL in Supabase
 3. **Real-time not working**: Check that real-time is enabled in your Supabase project
 4. **AI responses failing**: Verify your OpenRouter API key
+5. **Voice narration not working**: Check your ElevenLabs API key and ensure audio context is supported
 
 ### Support
 

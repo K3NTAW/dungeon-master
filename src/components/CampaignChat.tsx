@@ -8,10 +8,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star, Dices } from 'lucide-react';
+import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star, Dices, Volume2, VolumeX } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { InventoryManager } from '@/lib/inventory';
 import { CombatManager } from '@/lib/combat';
+import { ElevenLabsManager } from '@/lib/elevenlabs';
 import InlineDiceRoll from './InlineDiceRoll';
 
 interface Message {
@@ -65,6 +66,16 @@ export default function CampaignChat({
   const [inventory, setInventory] = useState('');
   const [pendingRolls, setPendingRolls] = useState<Array<{diceType: string, reason: string, result?: number}>>([]);
   const [isWaitingForRolls, setIsWaitingForRolls] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('VR6AewLTigWG4xSOukaG'); // Default to Arnold (deep, dramatic)
+  const [availableVoices, setAvailableVoices] = useState<any[]>([]);
+  const [voiceSettings, setVoiceSettings] = useState({
+    stability: 0.3,
+    similarity_boost: 0.85,
+    style: 0.8,
+    use_speaker_boost: true
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -77,6 +88,25 @@ export default function CampaignChat({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Load voices on mount
+  useEffect(() => {
+    loadVoices();
+  }, []);
+
+  // Handle voice synthesis for new AI messages
+  useEffect(() => {
+    if (isVoiceEnabled && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && lastMessage.content) {
+        // Clean the content for speech (remove dice roll placeholders)
+        const cleanContent = lastMessage.content.replace(/\[DICE:[^\]]+\]/g, '');
+        if (cleanContent.trim()) {
+          speakText(cleanContent);
+        }
+      }
+    }
+  }, [messages, isVoiceEnabled, selectedVoiceId]);
 
   // Load character data and messages
   useEffect(() => {
@@ -427,6 +457,59 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     textareaRef.current?.focus();
   };
 
+  const speakText = async (text: string) => {
+    if (!isVoiceEnabled || !ElevenLabsManager.isAvailable()) return;
+
+    try {
+      setIsSpeaking(true);
+      await ElevenLabsManager.speakText(text, selectedVoiceId, voiceSettings);
+    } catch (error) {
+      console.error('Error speaking text:', error);
+      setError('Failed to generate speech. Please check your ElevenLabs API key.');
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
+
+  const stopSpeaking = () => {
+    ElevenLabsManager.stopAudio();
+    setIsSpeaking(false);
+  };
+
+  const toggleVoice = () => {
+    if (isVoiceEnabled) {
+      stopSpeaking();
+    }
+    setIsVoiceEnabled(!isVoiceEnabled);
+  };
+
+  const loadVoices = async () => {
+    try {
+      const voices = await ElevenLabsManager.getVoices();
+      setAvailableVoices(voices);
+    } catch (error) {
+      console.error('Error loading voices:', error);
+    }
+  };
+
+  const testElevenLabs = async () => {
+    try {
+      const response = await fetch('/api/elevenlabs-test');
+      const data = await response.json();
+      console.log('ElevenLabs test result:', data);
+      
+      if (data.status === 'working') {
+        setError('');
+        alert(`✅ ElevenLabs is working! Found ${data.voiceCount} voices.`);
+      } else {
+        setError(`❌ ElevenLabs test failed: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Error testing ElevenLabs:', error);
+      setError('Failed to test ElevenLabs API');
+    }
+  };
+
   const handleDiceRoll = async (diceType: string, reason: string, result: number) => {
     if (!sessionId) return;
     
@@ -709,12 +792,29 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                 onChange={(e) => setModel(e.target.value)}
                 className="w-64"
               />
+              <Button
+                variant={isVoiceEnabled ? "default" : "outline"}
+                size="sm"
+                onClick={toggleVoice}
+                className="flex items-center gap-2"
+                disabled={!ElevenLabsManager.isAvailable()}
+                title={!ElevenLabsManager.isAvailable() ? "Audio context not supported" : isVoiceEnabled ? "Disable voice narration" : "Enable voice narration"}
+              >
+                {isSpeaking ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+                ) : isVoiceEnabled ? (
+                  <Volume2 className="h-4 w-4" />
+                ) : (
+                  <VolumeX className="h-4 w-4" />
+                )}
+                {isVoiceEnabled ? "ElevenLabs On" : "ElevenLabs Off"}
+              </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="chat" className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
                 Chat
@@ -722,10 +822,6 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
               <TabsTrigger value="sheet" className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
                 Character Sheet
-              </TabsTrigger>
-              <TabsTrigger value="combat" className="flex items-center gap-2">
-                <Star className="h-4 w-4" />
-                Combat
               </TabsTrigger>
               <TabsTrigger value="inventory" className="flex items-center gap-2">
                 <Package className="h-4 w-4" />
@@ -813,6 +909,19 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                     </div>
                   </div>
                 )}
+                
+                {isVoiceEnabled && isSpeaking && (
+                  <div className="flex justify-start">
+                    <div className="bg-green-100 border border-green-200 px-4 py-2 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <Volume2 className="h-4 w-4 text-green-600 animate-pulse" />
+                        <p className="text-sm font-medium text-green-800">
+                          Narrating...
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -870,93 +979,301 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                   </div>
                 )}
               </div>
-              <Textarea
-                value={characterSheet}
-                onChange={(e) => setCharacterSheet(e.target.value)}
-                className="min-h-[400px] resize-none font-mono text-sm"
-                readOnly
-              />
-            </TabsContent>
-
-            {/* Combat Tab */}
-            <TabsContent value="combat" className="space-y-4 mt-4">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Combat Information</h3>
-                {character && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Heart className="h-4 w-4" />
-                    <span>HP: {character.hit_points || 0}/{character.max_hit_points || 0}</span>
-                    <span>AC: {character.armor_class || 10}</span>
-                  </div>
-                )}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Basic Information */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Combat Stats</CardTitle>
+                    <CardTitle className="text-base">Basic Information</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
                     {character && (
                       <>
                         <div className="flex justify-between">
-                          <span>Initiative:</span>
+                          <span className="font-medium">Name:</span>
+                          <span>{character.name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Class:</span>
+                          <span>{character.class || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Level:</span>
+                          <span>{character.level}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Race:</span>
+                          <span>{character.race || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Background:</span>
+                          <span>{character.background || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Experience:</span>
+                          <span>{character.experience_points} XP</span>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Combat Stats */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Combat Statistics</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    {character && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Hit Points:</span>
+                          <span>{character.hit_points || 0}/{character.max_hit_points || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Armor Class:</span>
+                          <span>{character.armor_class || 10}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Initiative:</span>
                           <span>+{Math.floor((character.ability_scores?.dex || 10) - 10) / 2}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>Movement:</span>
+                          <span className="font-medium">Movement:</span>
                           <span>{CombatManager.calculateMovementSpeed(30, character.equipment, character.conditions)} feet</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>Melee Attack:</span>
+                          <span className="font-medium">Melee Attack:</span>
                           <span>+{CombatManager.calculateAttackBonus(character.ability_scores, character.class).melee}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>Ranged Attack:</span>
+                          <span className="font-medium">Ranged Attack:</span>
                           <span>+{CombatManager.calculateAttackBonus(character.ability_scores, character.class).ranged}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>Spell Attack:</span>
+                          <span className="font-medium">Spell Attack:</span>
                           <span>+{CombatManager.calculateAttackBonus(character.ability_scores, character.class).spell}</span>
                         </div>
                       </>
                     )}
                   </CardContent>
                 </Card>
+
+                {/* Ability Scores */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Available Actions</CardTitle>
+                    <CardTitle className="text-base">Ability Scores</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {character ? (
+                    {character && character.ability_scores ? (
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        {Object.entries(character.ability_scores).map(([ability, score]) => {
+                          const modifier = Math.floor((score as number) - 10) / 2;
+                          const modifierStr = modifier >= 0 ? `+${modifier}` : `${modifier}`;
+                          return (
+                            <div key={ability} className="flex justify-between items-center p-2 bg-muted rounded">
+                              <span className="font-medium uppercase">{ability}:</span>
+                              <div className="text-right">
+                                <div>{String(score)}</div>
+                                <div className="text-xs text-muted-foreground">({modifierStr})</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground text-sm">No ability scores available</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Skills */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Skills</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {character && character.skills ? (
                       <div className="space-y-1 text-sm">
-                        {CombatManager.getAvailableActions(character.equipment, character.inventory, character.ability_scores).map((action, index) => (
-                          <div key={index} className="px-2 py-1 bg-muted rounded text-xs">
-                            {action}
+                        {Object.entries(character.skills).map(([skill, value]) => (
+                          <div key={skill} className="flex justify-between items-center p-1">
+                            <span className="capitalize">{skill.replace(/_/g, ' ')}:</span>
+                            <span className="font-medium">{String(value)}</span>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-muted-foreground text-sm">No character loaded</p>
+                      <p className="text-muted-foreground text-sm">No skills available</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Spells */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Spells</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {character && character.spells ? (
+                      <div className="space-y-1 text-sm">
+                        {Array.isArray(character.spells) ? (
+                          character.spells.map((spell, index) => (
+                            <div key={index} className="p-1 bg-muted rounded">
+                              {typeof spell === 'string' ? spell : JSON.stringify(spell)}
+                            </div>
+                          ))
+                        ) : (
+                          Object.entries(character.spells).map(([level, spells]) => (
+                            <div key={level}>
+                              <div className="font-medium text-xs text-muted-foreground mb-1">
+                                Level {level} Spells:
+                              </div>
+                              {Array.isArray(spells) ? (
+                                spells.map((spell, index) => (
+                                  <div key={index} className="p-1 bg-muted rounded text-xs ml-2 mb-1">
+                                    {typeof spell === 'string' ? spell : JSON.stringify(spell)}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="p-1 bg-muted rounded text-xs ml-2">
+                                  {JSON.stringify(spells)}
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground text-sm">No spells available</p>
                     )}
                   </CardContent>
                 </Card>
               </div>
+
+              {/* Voice Settings */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Equipment Validation</CardTitle>
+                  <CardTitle className="text-base">ElevenLabs Voice Settings</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2 text-sm">
-                    <p className="text-muted-foreground">
-                      The AI will check your equipment before allowing actions. You cannot:
-                    </p>
-                    <ul className="list-disc list-inside space-y-1 text-xs">
-                      <li>Use shield bash without a shield</li>
-                      <li>Two-weapon fight without two weapons</li>
-                      <li>Cast spells without components</li>
-                      <li>Use ranged weapons without ammunition</li>
-                      <li>Wear heavy armor without sufficient Strength</li>
-                    </ul>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">Voice Narration</p>
+                        <p className="text-xs text-muted-foreground">
+                          Have the AI narrate responses using ElevenLabs
+                        </p>
+                      </div>
+                      <Button
+                        variant={isVoiceEnabled ? "default" : "outline"}
+                        size="sm"
+                        onClick={toggleVoice}
+                        disabled={!ElevenLabsManager.isAvailable()}
+                      >
+                        {isVoiceEnabled ? "Enabled" : "Disabled"}
+                      </Button>
+                    </div>
+                    
+                    {isVoiceEnabled && availableVoices.length === 0 && (
+                      <div className="p-3 bg-red-100 border border-red-200 rounded-md">
+                        <p className="text-xs text-red-800">
+                          ❌ ElevenLabs API key not configured. Please add ELEVENLABS_API_KEY to your .env.local file.
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={testElevenLabs}
+                          className="mt-2"
+                        >
+                          Test ElevenLabs Connection
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {!ElevenLabsManager.isAvailable() && (
+                      <div className="p-3 bg-yellow-100 border border-yellow-200 rounded-md">
+                        <p className="text-xs text-yellow-800">
+                          ⚠️ Audio context is not supported in your browser. Voice narration will not be available.
+                        </p>
+                      </div>
+                    )}
+                    
+                    {isVoiceEnabled && (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Select Voice</label>
+                          <select
+                            value={selectedVoiceId}
+                            onChange={(e) => setSelectedVoiceId(e.target.value)}
+                            className="w-full p-2 border rounded-md text-sm"
+                          >
+                            {availableVoices.map((voice) => (
+                              <option key={voice.voice_id} value={voice.voice_id}>
+                                {voice.name} {voice.description ? `(${voice.description})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-sm font-medium">Emotion (Style)</label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.1"
+                              value={voiceSettings.style}
+                              onChange={(e) => setVoiceSettings(prev => ({ ...prev, style: parseFloat(e.target.value) }))}
+                              className="w-full"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Higher = More dramatic and emotional
+                            </p>
+                          </div>
+                          
+                          <div>
+                            <label className="text-sm font-medium">Stability</label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.1"
+                              value={voiceSettings.stability}
+                              onChange={(e) => setVoiceSettings(prev => ({ ...prev, stability: parseFloat(e.target.value) }))}
+                              className="w-full"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Lower = More variation and emotion
+                            </p>
+                          </div>
+                          
+                          <div>
+                            <label className="text-sm font-medium">Voice Similarity</label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.1"
+                              value={voiceSettings.similarity_boost}
+                              onChange={(e) => setVoiceSettings(prev => ({ ...prev, similarity_boost: parseFloat(e.target.value) }))}
+                              className="w-full"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Higher = More consistent character voice
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {isVoiceEnabled && (
+                      <div className="p-3 bg-green-100 border border-green-200 rounded-md">
+                        <p className="text-xs text-green-800">
+                          ✅ ElevenLabs voice narration is active. The AI will read its responses aloud.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -965,14 +1282,232 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
             {/* Inventory Tab */}
             <TabsContent value="inventory" className="space-y-4 mt-4">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Inventory & Conditions</h3>
+                <h3 className="text-lg font-semibold">Inventory & Equipment</h3>
+                {character && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Package className="h-4 w-4" />
+                    <span>Items: {Array.isArray(character.inventory) ? character.inventory.length : 0}</span>
+                  </div>
+                )}
               </div>
-              <Textarea
-                value={inventory}
-                onChange={(e) => setInventory(e.target.value)}
-                className="min-h-[400px] resize-none font-mono text-sm"
-                readOnly
-              />
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Equipment */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <span>⚔️</span>
+                      Equipment
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {character && character.equipment ? (
+                      <div className="space-y-3">
+                        {Array.isArray(character.equipment) ? (
+                          character.equipment.length > 0 ? (
+                            character.equipment.map((item, index) => (
+                              <div key={index} className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                    <span className="text-blue-600 text-sm">⚔️</span>
+                                  </div>
+                                  <div>
+                                    <div className="font-medium text-sm">
+                                      {typeof item === 'string' ? item : (item as any)?.name || 'Unknown Item'}
+                                    </div>
+                                    {typeof item === 'object' && (item as any)?.description && (
+                                      <div className="text-xs text-muted-foreground">
+                                        {(item as any).description}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                {typeof item === 'object' && (item as any)?.quantity && (
+                                  <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                    x{(item as any).quantity}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 text-muted-foreground">
+                              <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                              <p className="text-sm">No equipment equipped</p>
+                            </div>
+                          )
+                        ) : (
+                          Object.entries(character.equipment).map(([category, items]) => (
+                            <div key={category} className="space-y-2">
+                              <div className="font-medium text-sm text-muted-foreground capitalize border-b pb-1">
+                                {category.replace(/_/g, ' ')}:
+                              </div>
+                              {Array.isArray(items) ? (
+                                items.map((item, index) => (
+                                  <div key={index} className="flex items-center justify-between p-2 bg-muted rounded ml-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs">•</span>
+                                      <span className="text-sm">
+                                        {typeof item === 'string' ? item : (item as any)?.name || 'Unknown Item'}
+                                      </span>
+                                    </div>
+                                    {typeof item === 'object' && (item as any)?.quantity && (
+                                      <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
+                                        x{(item as any).quantity}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="p-2 bg-muted rounded ml-2 text-sm">
+                                  {JSON.stringify(items)}
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No equipment available</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Inventory */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <span>🎒</span>
+                      Inventory
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {character && character.inventory ? (
+                      <div className="space-y-2">
+                        {Array.isArray(character.inventory) ? (
+                          character.inventory.length > 0 ? (
+                            character.inventory.map((item, index) => (
+                              <div key={index} className="flex items-center justify-between p-3 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                                    <span className="text-green-600 text-sm">🎒</span>
+                                  </div>
+                                  <div>
+                                    <div className="font-medium text-sm">
+                                      {typeof item === 'string' ? item : (item as any)?.name || 'Unknown Item'}
+                                    </div>
+                                    {typeof item === 'object' && (item as any)?.description && (
+                                      <div className="text-xs text-muted-foreground">
+                                        {(item as any).description}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                {typeof item === 'object' && (item as any)?.quantity && (
+                                  <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                                    x{(item as any).quantity}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 text-muted-foreground">
+                              <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                              <p className="text-sm">Inventory is empty</p>
+                            </div>
+                          )
+                        ) : (
+                          <div className="text-center py-8 text-muted-foreground">
+                            <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No inventory data</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No inventory available</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Conditions & Effects */}
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <span>⚡</span>
+                      Conditions & Effects
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {character && character.conditions ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {Array.isArray(character.conditions) ? (
+                          character.conditions.length > 0 ? (
+                            character.conditions.map((condition, index) => (
+                              <div key={index} className="flex items-center justify-between p-3 bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                                    <span className="text-orange-600 text-sm">⚡</span>
+                                  </div>
+                                  <div>
+                                    <div className="font-medium text-sm">
+                                      {typeof condition === 'string' ? condition : (condition as any)?.name || 'Unknown Condition'}
+                                    </div>
+                                    {typeof condition === 'object' && (condition as any)?.description && (
+                                      <div className="text-xs text-muted-foreground">
+                                        {(condition as any).description}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                {typeof condition === 'object' && (condition as any)?.duration && (
+                                  <div className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
+                                    {(condition as any).duration}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="col-span-2 text-center py-8 text-muted-foreground">
+                              <span className="text-2xl mb-2 block">✨</span>
+                              <p className="text-sm">No conditions or effects</p>
+                            </div>
+                          )
+                        ) : (
+                          Object.entries(character.conditions).map(([condition, details]: [string, any]) => (
+                            <div key={condition} className="flex items-center justify-between p-3 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                                  <span className="text-purple-600 text-sm">⚡</span>
+                                </div>
+                                <div>
+                                  <div className="font-medium text-sm capitalize">
+                                    {condition.replace(/_/g, ' ')}
+                                  </div>
+                                  {details && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {typeof details === 'string' ? details : JSON.stringify(details as any)}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <span className="text-2xl mb-2 block">✨</span>
+                        <p className="text-sm">No conditions or effects</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </TabsContent>
 
 
