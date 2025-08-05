@@ -30,7 +30,7 @@ export default function InlineDiceRoll({ diceType, reason, onRoll, className = '
     return { dc, displayReason };
   };
 
-  const { dc, displayReason } = parseReason(reason);
+  const { dc: _dc, displayReason } = parseReason(reason);
 
   const parseDice = (diceString: string) => {
     const match = diceString.match(/^(\d+)?d(\d+)$/);
@@ -104,6 +104,11 @@ export default function InlineDiceRoll({ diceType, reason, onRoll, className = '
       ) : (
         <div className="flex flex-col items-center ml-2">
           <span className="font-bold text-lg">= {result}</span>
+          {_dc && (
+            <span className={`text-xs font-semibold ${result >= _dc ? 'text-green-600' : 'text-red-600'}`}>
+              {result >= _dc ? 'SUCCESS' : 'FAILURE'}
+            </span>
+          )}
         </div>
       )}
     </div>
