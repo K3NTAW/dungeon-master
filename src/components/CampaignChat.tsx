@@ -211,9 +211,26 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || isLoading || !sessionId) return;
+    console.log('sendMessage called with:', { 
+      input: input.trim(), 
+      isLoading, 
+      sessionId, 
+      campaignId, 
+      characterId 
+    });
+    
+    if (!input.trim() || isLoading || !sessionId) {
+      console.log('sendMessage early return:', { 
+        hasInput: !!input.trim(), 
+        isLoading, 
+        hasSessionId: !!sessionId 
+      });
+      return;
+    }
 
     const userMessage = input.trim();
+    console.log('Processing message:', userMessage);
+    
     setInput('');
     setIsLoading(true);
     setError('');
@@ -245,25 +262,38 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
 
       console.log('Sending message with context:', context);
       
+      const requestBody = {
+        messages: [...messages, { role: 'user', content: userMessage }],
+        model,
+        context,
+      };
+      
+      console.log('Making fetch request to /api/campaign-chat with body:', requestBody);
+      
       const response = await fetch('/api/campaign-chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          messages: [...messages, { role: 'user', content: userMessage }],
-          model,
-          context,
-        }),
+        body: JSON.stringify(requestBody),
+      });
+
+      console.log('Fetch response received:', { 
+        ok: response.ok, 
+        status: response.status, 
+        statusText: response.statusText 
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('API error response:', errorData);
         throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
       console.log('Campaign chat response:', data);
+      
+      console.log('Saving user message to database...');
       
       // Save user message to database
       const { data: userMessageData, error: userMessageError } = await supabase
@@ -278,9 +308,15 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
         .select()
         .single();
 
-      if (userMessageError) throw userMessageError;
+      if (userMessageError) {
+        console.error('Error saving user message:', userMessageError);
+        throw userMessageError;
+      }
+      
+      console.log('User message saved successfully:', userMessageData);
 
       // Save assistant message to database
+      console.log('Saving assistant message to database...');
       const { data: assistantMessageData, error: assistantMessageError } = await supabase
         .from('messages')
         .insert([
@@ -294,9 +330,15 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
         .select()
         .single();
 
-      if (assistantMessageError) throw assistantMessageError;
+      if (assistantMessageError) {
+        console.error('Error saving assistant message:', assistantMessageError);
+        throw assistantMessageError;
+      }
+      
+      console.log('Assistant message saved successfully:', assistantMessageData);
 
       // Add messages to local state
+      console.log('Updating local message state...');
       setMessages(prev => [...prev, 
         {
           id: userMessageData.id,
@@ -448,7 +490,9 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
+    console.log('Key press event:', { key: e.key, shiftKey: e.shiftKey });
     if (e.key === 'Enter' && !e.shiftKey) {
+      console.log('Enter pressed without shift, sending message...');
       e.preventDefault();
       sendMessage();
     }
@@ -944,7 +988,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                 <div ref={messagesEndRef} />
               </div>
 
-              <div className="flex gap-2">
+              <form onSubmit={(e) => { e.preventDefault(); console.log('Form submitted, calling sendMessage...'); sendMessage(); }} className="flex gap-2">
                 <Textarea
                   ref={textareaRef}
                   placeholder="Tell the DM what you want to do..."
@@ -956,7 +1000,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                 />
                 <div className="flex flex-col gap-2">
                   <Button 
-                    onClick={sendMessage} 
+                    type="submit"
                     disabled={isLoading || !input.trim()}
                     className="self-end"
                   >
@@ -974,6 +1018,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                   </Button>
                   {messages.length > 0 && (
                     <Button 
+                      type="button"
                       variant="outline" 
                       size="sm" 
                       onClick={clearChat}
@@ -982,7 +1027,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                     </Button>
                   )}
                 </div>
-              </div>
+              </form>
             </TabsContent>
 
             {/* Character Sheet Tab */}
