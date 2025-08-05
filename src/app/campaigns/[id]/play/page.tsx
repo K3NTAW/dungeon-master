@@ -253,10 +253,19 @@ export default function PlayPage() {
         <div className="mb-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5" />
-                Party Management
-              </CardTitle>
+              <div className="flex justify-between items-center">
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Party Management
+                </CardTitle>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => router.push(`/campaigns/${id}`)}
+                >
+                  Manage Characters
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">

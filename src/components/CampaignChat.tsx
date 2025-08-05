@@ -752,11 +752,15 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
       const reason = match[2];
       foundRolls.push({ diceType, reason });
       
+      // Add character context to the dice roll
+      const characterContext = character ? ` (${character.name})` : '';
+      const enhancedReason = reason + characterContext;
+      
       parts.push(
         <InlineDiceRoll
           key={`dice-${match.index}`}
           diceType={diceType}
-          reason={reason}
+          reason={enhancedReason}
           onRoll={(result) => handleDiceRoll(diceType, reason, result)}
           className="my-2"
         />
@@ -771,9 +775,19 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     }
 
     // Set up multi-roll sequence if multiple rolls are found
+    // Only do this if there are multiple rolls AND we're not already waiting for rolls
     if (foundRolls.length > 1 && !isWaitingForRolls) {
-      setPendingRolls(foundRolls.map(roll => ({ ...roll, result: undefined })));
-      setIsWaitingForRolls(true);
+      // Check if these are related rolls (like attack + damage) vs separate options
+      const isRelatedRolls = foundRolls.every(roll => 
+        roll.reason.toLowerCase().includes('attack') || 
+        roll.reason.toLowerCase().includes('damage') ||
+        roll.reason.toLowerCase().includes('initiative')
+      );
+      
+      if (isRelatedRolls) {
+        setPendingRolls(foundRolls.map(roll => ({ ...roll, result: undefined })));
+        setIsWaitingForRolls(true);
+      }
     }
 
     return parts.length > 0 ? parts : content;
@@ -826,11 +840,11 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
               </TabsTrigger>
               <TabsTrigger value="sheet" className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
-                Character Sheet
+                Character Sheet{character ? ` of ${character.name}` : ''}
               </TabsTrigger>
               <TabsTrigger value="inventory" className="flex items-center gap-2">
                 <Package className="h-4 w-4" />
-                Inventory
+                Inventory{character ? ` of ${character.name}` : ''}
               </TabsTrigger>
             </TabsList>
 
