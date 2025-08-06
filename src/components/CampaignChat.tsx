@@ -8,7 +8,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star, Dices, Volume2, VolumeX } from 'lucide-react';
+import { Send, Loader2, FileText, Package, MessageSquare, Heart, Star, Dices, Volume2, VolumeX, Image, Download } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { supabase } from '@/lib/supabase';
 import { InventoryManager } from '@/lib/inventory';
 import { CombatManager } from '@/lib/combat';
@@ -78,6 +79,9 @@ export default function CampaignChat({
     style: 0.8,
     use_speaker_boost: true
   });
+  const [itemImages, setItemImages] = useState<Record<string, string>>({});
+  const [generatingImages, setGeneratingImages] = useState<Set<string>>(new Set());
+  const [replicateAvailable, setReplicateAvailable] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -94,6 +98,11 @@ export default function CampaignChat({
   // Load voices on mount
   useEffect(() => {
     loadVoices();
+  }, []);
+
+  // Check Replicate status on mount
+  useEffect(() => {
+    checkReplicateStatus();
   }, []);
 
   // Handle voice synthesis for new AI messages
@@ -557,6 +566,80 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     }
   };
 
+  const checkReplicateStatus = async () => {
+    try {
+      const response = await fetch('/api/generate-item-image');
+      const data = await response.json();
+      setReplicateAvailable(data.available);
+    } catch (error) {
+      console.error('Error checking Replicate status:', error);
+      setReplicateAvailable(false);
+    }
+  };
+
+  const generateItemImage = async (itemName: string, itemType: string = 'item') => {
+    if (generatingImages.has(itemName)) return;
+    
+    setGeneratingImages(prev => new Set(prev).add(itemName));
+    
+    try {
+      const response = await fetch('/api/generate-item-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          itemName,
+          itemType,
+          options: {
+            width: 256,
+            height: 256,
+            quality: 25,
+            style: 'cinematic'
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to generate image: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.image) {
+        setItemImages(prev => ({
+          ...prev,
+          [itemName]: data.image.url
+        }));
+      }
+    } catch (error) {
+      console.error('Error generating image for', itemName, ':', error);
+    } finally {
+      setGeneratingImages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(itemName);
+        return newSet;
+      });
+    }
+  };
+
+  const downloadImage = async (imageUrl: string, itemName: string) => {
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${itemName.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading image:', error);
+    }
+  };
+
   const handleDiceRoll = async (diceType: string, reason: string, result: number) => {
     if (!sessionId) return;
     
@@ -777,6 +860,126 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
     }
   };
 
+  const renderItemWithImage = (item: any, index: number, type: 'equipment' | 'inventory' | 'condition') => {
+    const itemName = typeof item === 'string' ? item : (item as any)?.name || 'Unknown Item';
+    const itemDescription = typeof item === 'object' && (item as any)?.description;
+    const itemQuantity = typeof item === 'object' && (item as any)?.quantity;
+    const itemDuration = typeof item === 'object' && (item as any)?.duration;
+    
+    const hasImage = itemImages[itemName];
+    const isGenerating = generatingImages.has(itemName);
+    
+    const getItemType = (itemName: string, type: string) => {
+      const lowerName = itemName.toLowerCase();
+      if (lowerName.includes('sword') || lowerName.includes('axe') || lowerName.includes('bow') || lowerName.includes('dagger')) return 'weapon';
+      if (lowerName.includes('armor') || lowerName.includes('shield') || lowerName.includes('helmet')) return 'armor';
+      if (lowerName.includes('potion') || lowerName.includes('elixir')) return 'potion';
+      if (lowerName.includes('scroll') || lowerName.includes('spell')) return 'scroll';
+      if (lowerName.includes('ring') || lowerName.includes('amulet')) return 'ring';
+      if (lowerName.includes('wand') || lowerName.includes('staff')) return 'wand';
+      if (lowerName.includes('book') || lowerName.includes('tome')) return 'book';
+      if (lowerName.includes('coin') || lowerName.includes('gold')) return 'coin';
+      if (lowerName.includes('gem') || lowerName.includes('crystal')) return 'gem';
+      if (lowerName.includes('ration') || lowerName.includes('food')) return 'food';
+      return 'tool';
+    };
+
+    const getGradientClass = (type: string) => {
+      switch (type) {
+        case 'equipment': return 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200';
+        case 'inventory': return 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200';
+        case 'condition': return 'bg-gradient-to-r from-orange-50 to-red-50 border-orange-200';
+        default: return 'bg-gradient-to-r from-gray-50 to-slate-50 border-gray-200';
+      }
+    };
+
+    const getIconClass = (type: string) => {
+      switch (type) {
+        case 'equipment': return 'bg-blue-100 text-blue-600';
+        case 'inventory': return 'bg-green-100 text-green-600';
+        case 'condition': return 'bg-orange-100 text-orange-600';
+        default: return 'bg-gray-100 text-gray-600';
+      }
+    };
+
+    const getIcon = (type: string) => {
+      switch (type) {
+        case 'equipment': return '⚔️';
+        case 'inventory': return '🎒';
+        case 'condition': return '⚡';
+        default: return '📦';
+      }
+    };
+
+    return (
+      <div key={index} className={`flex items-center justify-between p-3 ${getGradientClass(type)} border rounded-lg`}>
+        <div className="flex items-center gap-3 flex-1">
+          {hasImage ? (
+            <div className="relative">
+              <img 
+                src={hasImage} 
+                alt={itemName}
+                className="w-12 h-12 object-cover rounded-lg border-2 border-white shadow-sm"
+              />
+              {replicateAvailable && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="absolute -top-1 -right-1 w-6 h-6 p-0 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50"
+                  onClick={() => downloadImage(hasImage, itemName)}
+                  title="Download image"
+                >
+                  <Download className="w-3 h-3" />
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className={`w-12 h-12 ${getIconClass(type)} rounded-lg flex items-center justify-center`}>
+              <span className="text-sm">{getIcon(type)}</span>
+            </div>
+          )}
+          
+          <div className="flex-1 min-w-0">
+            <div className="font-medium text-sm truncate">
+              {itemName}
+            </div>
+            {itemDescription && (
+              <div className="text-xs text-muted-foreground truncate">
+                {itemDescription}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          {(itemQuantity || itemDuration) && (
+            <div className={`text-xs ${getIconClass(type)} px-2 py-1 rounded-full`}>
+              {itemQuantity ? `x${itemQuantity}` : itemDuration}
+            </div>
+          )}
+          
+          {replicateAvailable && !hasImage && !isGenerating && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-8 h-8 p-0"
+              onClick={() => generateItemImage(itemName, getItemType(itemName, type))}
+              title="Generate image"
+            >
+              <Image className="w-4 h-4" />
+            </Button>
+          )}
+          
+          {isGenerating && (
+            <div className="w-8 h-8 flex items-center justify-center">
+              <Loader2 className="w-4 h-4 animate-spin" />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderMessageContent = (content: string, _metadata?: any) => {
     // Check if the message contains dice roll requests
     const diceRollRegex = /\[DICE:([^:]+):([^\]]+)\]/g;
@@ -849,6 +1052,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
               </CardDescription>
             </div>
             <div className="flex gap-2">
+              <ThemeToggle />
               <Input
                 placeholder="Model (e.g., openrouter/horizon-beta)"
                 value={model}
@@ -1347,12 +1551,20 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
             <TabsContent value="inventory" className="space-y-4 mt-4">
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-semibold">Inventory & Equipment</h3>
-                {character && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Package className="h-4 w-4" />
-                    <span>Items: {Array.isArray(character.inventory) ? character.inventory.length : 0}</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-4">
+                  {replicateAvailable && (
+                    <div className="flex items-center gap-2 text-sm text-green-600">
+                      <Image className="h-4 w-4" />
+                      <span>AI Images Available</span>
+                    </div>
+                  )}
+                  {character && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Package className="h-4 w-4" />
+                      <span>Items: {Array.isArray(character.inventory) ? character.inventory.length : 0}</span>
+                    </div>
+                  )}
+                </div>
               </div>
               
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1369,30 +1581,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                       <div className="space-y-3">
                         {Array.isArray(character.equipment) ? (
                           character.equipment.length > 0 ? (
-                            character.equipment.map((item, index) => (
-                              <div key={index} className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                    <span className="text-blue-600 text-sm">⚔️</span>
-                                  </div>
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {typeof item === 'string' ? item : (item as any)?.name || 'Unknown Item'}
-                                    </div>
-                                    {typeof item === 'object' && (item as any)?.description && (
-                                      <div className="text-xs text-muted-foreground">
-                                        {(item as any).description}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                {typeof item === 'object' && (item as any)?.quantity && (
-                                  <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                                    x{(item as any).quantity}
-                                  </div>
-                                )}
-                              </div>
-                            ))
+                            character.equipment.map((item, index) => renderItemWithImage(item, index, 'equipment'))
                           ) : (
                             <div className="text-center py-8 text-muted-foreground">
                               <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -1452,30 +1641,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                       <div className="space-y-2">
                         {Array.isArray(character.inventory) ? (
                           character.inventory.length > 0 ? (
-                            character.inventory.map((item, index) => (
-                              <div key={index} className="flex items-center justify-between p-3 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                                    <span className="text-green-600 text-sm">🎒</span>
-                                  </div>
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {typeof item === 'string' ? item : (item as any)?.name || 'Unknown Item'}
-                                    </div>
-                                    {typeof item === 'object' && (item as any)?.description && (
-                                      <div className="text-xs text-muted-foreground">
-                                        {(item as any).description}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                {typeof item === 'object' && (item as any)?.quantity && (
-                                  <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                                    x{(item as any).quantity}
-                                  </div>
-                                )}
-                              </div>
-                            ))
+                            character.inventory.map((item, index) => renderItemWithImage(item, index, 'inventory'))
                           ) : (
                             <div className="text-center py-8 text-muted-foreground">
                               <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -1511,30 +1677,7 @@ ${Array.isArray(char.conditions) ? char.conditions.join('\n') : 'None'}`;
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {Array.isArray(character.conditions) ? (
                           character.conditions.length > 0 ? (
-                            character.conditions.map((condition, index) => (
-                              <div key={index} className="flex items-center justify-between p-3 bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
-                                    <span className="text-orange-600 text-sm">⚡</span>
-                                  </div>
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {typeof condition === 'string' ? condition : (condition as any)?.name || 'Unknown Condition'}
-                                    </div>
-                                    {typeof condition === 'object' && (condition as any)?.description && (
-                                      <div className="text-xs text-muted-foreground">
-                                        {(condition as any).description}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                {typeof condition === 'object' && (condition as any)?.duration && (
-                                  <div className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
-                                    {(condition as any).duration}
-                                  </div>
-                                )}
-                              </div>
-                            ))
+                            character.conditions.map((condition, index) => renderItemWithImage(condition, index, 'condition'))
                           ) : (
                             <div className="col-span-2 text-center py-8 text-muted-foreground">
                               <span className="text-2xl mb-2 block">✨</span>

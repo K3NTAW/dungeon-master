@@ -23,6 +23,9 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 # ElevenLabs Configuration (for voice narration)
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
 ELEVENLABS_VOICE_ID=VR6AewLTigWG4xSOukaG
+
+# Replicate Configuration (for item image generation)
+REPLICATE_API_KEY=your_replicate_api_key
 ```
 
 ### Getting Supabase Credentials
@@ -51,6 +54,14 @@ ELEVENLABS_VOICE_ID=VR6AewLTigWG4xSOukaG
 1. In your ElevenLabs dashboard, find Brian's voice ID
 2. Replace `ELEVENLABS_VOICE_ID=VR6AewLTigWG4xSOukaG` with `ELEVENLABS_VOICE_ID=your_brian_voice_id`
 3. The app will automatically use Brian's voice for narration
+
+### Getting Replicate API Key
+
+1. Go to [replicate.com](https://replicate.com) and create an account
+2. Navigate to your account settings
+3. Copy your API token
+4. Add it to your `.env.local` file
+5. The app will automatically generate images for D&D items when available
 
 ## 2. Database Setup
 
@@ -97,6 +108,13 @@ The application will be available at `http://localhost:3000`
 - Multiple voice options for different characters
 - Real-time voice narration of AI responses
 - Voice settings and controls
+
+### Item Image Generation
+- Replicate integration for AI-generated item images
+- Automatic image generation for D&D items
+- Multiple AI models (SDXL, Midjourney, Realistic Vision)
+- Download generated images
+- Smart item type detection for better prompts
 
 ## 6. Database Schema
 
@@ -149,6 +167,7 @@ The database is hosted on Supabase, which provides:
 3. **Real-time not working**: Check that real-time is enabled in your Supabase project
 4. **AI responses failing**: Verify your OpenRouter API key
 5. **Voice narration not working**: Check your ElevenLabs API key and ensure audio context is supported
+6. **Item images not generating**: Verify your Replicate API key and check the browser console for errors
 
 ### Support
 

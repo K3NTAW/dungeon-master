@@ -5,12 +5,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { Plus, Sword, Play, Edit, Trash2, LogOut, Calendar } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import CreateCampaignDialog from '@/components/CreateCampaignDialog';
 
 interface Campaign {
   id: string;
@@ -27,7 +26,6 @@ export default function CampaignsPage() {
   const { user, signOut } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newCampaign, setNewCampaign] = useState({ title: '', description: '' });
   const [isCreating, setIsCreating] = useState(false);
   const router = useRouter();
 
@@ -69,8 +67,8 @@ export default function CampaignsPage() {
     }
   };
 
-  const createCampaign = async () => {
-    if (!newCampaign.title.trim()) return;
+  const createCampaign = async (campaignData: { title: string; description: string }) => {
+    if (!campaignData.title.trim()) return;
 
     setIsCreating(true);
     try {
@@ -79,8 +77,8 @@ export default function CampaignsPage() {
         .insert([
           {
             user_id: user?.id,
-            title: newCampaign.title.trim(),
-            description: newCampaign.description.trim() || null,
+            title: campaignData.title.trim(),
+            description: campaignData.description.trim() || null,
           },
         ])
         .select()
@@ -88,10 +86,10 @@ export default function CampaignsPage() {
 
       if (error) throw error;
 
-      setNewCampaign({ title: '', description: '' });
       await loadCampaigns();
     } catch (error) {
       console.error('Error creating campaign:', error);
+      throw error; // Re-throw so the dialog can handle it
     } finally {
       setIsCreating(false);
     }
@@ -142,54 +140,22 @@ export default function CampaignsPage() {
               Manage your D&D adventures
             </p>
           </div>
-          <Button variant="outline" onClick={handleSignOut}>
-            <LogOut className="h-4 w-4 mr-2" />
-            Sign Out
-          </Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button variant="outline" onClick={handleSignOut}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
+            </Button>
+          </div>
         </div>
 
         {/* Create New Campaign */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5" />
-              Create New Campaign
-            </CardTitle>
-            <CardDescription>
-              Start a new D&D adventure
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="title">Campaign Title</Label>
-                <Input
-                  id="title"
-                  placeholder="e.g., The Lost Mines of Phandelver"
-                  value={newCampaign.title}
-                  onChange={(e) => setNewCampaign(prev => ({ ...prev, title: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Description (Optional)</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Brief description of your campaign..."
-                  value={newCampaign.description}
-                  onChange={(e) => setNewCampaign(prev => ({ ...prev, description: e.target.value }))}
-                  className="min-h-[80px]"
-                />
-              </div>
-            </div>
-            <Button 
-              onClick={createCampaign} 
-              disabled={isCreating || !newCampaign.title.trim()}
-              className="w-full md:w-auto"
-            >
-              {isCreating ? 'Creating...' : 'Create Campaign'}
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="mb-8 flex justify-center">
+          <CreateCampaignDialog 
+            onCreateCampaign={createCampaign} 
+            isCreating={isCreating} 
+          />
+        </div>
 
         {/* Campaigns List */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">

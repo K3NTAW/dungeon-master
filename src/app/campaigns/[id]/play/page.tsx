@@ -47,6 +47,11 @@ export default function PlayPage() {
       router.push('/');
       return;
     }
+    if (!id) {
+      console.error('No campaign ID provided');
+      router.push('/campaigns');
+      return;
+    }
     loadCampaignData();
   }, [id, user, router]);
 
@@ -110,10 +115,18 @@ export default function PlayPage() {
         
         // Load or create session for the campaign
         await loadOrCreateSession();
+      } else {
+        // No characters, but still create a session for the campaign
+        await loadOrCreateSession();
       }
 
     } catch (error) {
-      console.error('Error loading campaign data:', error);
+      console.error('Error loading campaign data:', {
+        error,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        campaignId: id,
+        userId: user?.id
+      });
       router.push('/campaigns');
     } finally {
       setLoading(false);
@@ -122,6 +135,8 @@ export default function PlayPage() {
 
   const loadOrCreateSession = async () => {
     try {
+      console.log('Loading/creating session for campaign:', id);
+      
       // For party-based gameplay, we use one session per campaign
       const { data: existingSession, error: findError } = await supabase
         .from('sessions')
@@ -131,26 +146,65 @@ export default function PlayPage() {
         .limit(1)
         .single();
 
+      if (findError) {
+        console.log('Error finding existing session:', findError);
+        // If it's a "not found" error, that's expected - we'll create a new session
+        if (findError.code !== 'PGRST116') {
+          throw findError;
+        }
+      }
+
       if (existingSession) {
+        console.log('Found existing session:', existingSession.id);
         setCurrentSession(existingSession.id);
       } else {
+        console.log('No existing session found, creating new one...');
+        
+        if (!campaign?.title) {
+          throw new Error('Campaign title is required to create session');
+        }
+
+        if (!user?.id) {
+          throw new Error('User ID is required to create session');
+        }
+
         // Create new session for the campaign
         const { data: newSession, error: createError } = await supabase
           .from('sessions')
           .insert([
             {
+              user_id: user?.id,
               campaign_id: id,
-              title: `${campaign?.title} - Party Session`,
+              title: `${campaign.title} - Party Session`,
             },
           ])
           .select()
           .single();
 
-        if (createError) throw createError;
+        if (createError) {
+          console.error('Error creating new session:', createError);
+          throw createError;
+        }
+        
+        if (!newSession) {
+          throw new Error('Failed to create session - no data returned');
+        }
+        
+        console.log('Created new session:', newSession.id);
         setCurrentSession(newSession.id);
       }
     } catch (error) {
-      console.error('Error loading/creating session:', error);
+      console.error('Error loading/creating session:', {
+        error,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        campaignId: id,
+        campaignTitle: campaign?.title
+      });
+      
+      // Set a fallback session ID to prevent the app from breaking
+      const fallbackSessionId = `fallback-${id}-${Date.now()}`;
+      console.log('Using fallback session ID:', fallbackSessionId);
+      setCurrentSession(fallbackSessionId);
     }
   };
 
